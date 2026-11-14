@@ -1,73 +1,132 @@
-# Local Mate
+# Local Mate · Next.js + Supabase + Vercel
 
-A responsive local-services marketplace for Pattambi and nearby Kerala towns, styled after the supplied blue-and-white home-services reference.
+Local Mate is a local-services marketplace starting in Pattambi, Kerala. This version preserves the blue-and-white interface and the earlier Git history, and migrates the application from Sites/Cloudflare D1 to the requested stack.
 
-## What works
+- **Frontend and server:** Next.js 16 App Router, React, TypeScript server code.
+- **Backend:** Supabase PostgreSQL, Auth, Row Level Security and Realtime.
+- **Version control:** `https://github.com/nushanhia-tech/home-care`.
+- **Deployment target:** Vercel, Mumbai region.
 
-- React interface: home, searchable category catalogue, provider directory, service-specific booking forms, customer account, provider portal, protected administrator portal, support and policy screens.
-- Sites-authenticated accounts. Server authorization derives identity exclusively from Sites-verified headers. Administrator access is controlled by the secure `ADMIN_EMAILS` setting. Clients cannot grant themselves roles.
-- D1 relational storage, foreign keys, indexes and a checked-in schema migration. No fabricated providers, reviews, customer bookings or transactions are seeded.
-- Editable services with fixed, quotation, transport, goods, rental and emergency flows. An administrator initializes the starter catalogue with the button in Admin → Overview, then edits or adds services through Admin → Services.
-- Indian phone profiles, customer-owned saved addresses, supported-town selection, location/service/verification/online-state matching, future-date validation, idempotent booking requests and an atomic single-provider acceptance guard.
-- Provider applications and approval, online/offline state, accept/reject, quotations, customer quotation approval/rejection, sequential job states, timestamped history, customer cancellation/rescheduling and manual admin assignment.
-- Booking-scoped text messages with 10-second refresh, persisted in-app notifications, support tickets and administrator responses. No claim of external message delivery is made.
-- One verified review per completed booking, approved-provider ratings, favourites API, CSV booking/earnings exports, and downloadable service summaries clearly distinguished from proof of payment.
-- Server-side Razorpay order creation and HMAC-verified capture webhook with amount/currency validation. Browser assertions never mark a payment successful. Cash bookings remain pending without reconciliation.
-- Server-side request validation, cross-origin write protection, role checks and a per-user write limit of 60 requests/minute.
+No live Supabase or Vercel project is hardcoded into the source. Projects and environment settings must be provisioned before account/booking features can run. The earlier private Sites publication remains a separate deployment and does not receive these Next.js changes.
 
-## Launch
+## Working implementation
 
-1. Sign in to the private Site using the administrator email configured by the owner.
-2. Open Admin portal in the footer → Initialize service catalogue.
-3. Pros sign in, complete a profile with an Indian phone number, and apply through Become a pro.
-4. Review identity and any required qualifications outside the app before approving a provider in Admin → Providers.
-5. Approved providers set themselves online under Availability. Customers can then create requests for matching services and towns.
-6. Providers accept or submit a quote. Customers approve quotation-based work before the job progresses.
+The UI includes service browsing/search, a town selector, distinct service/quotation/transport/goods/rental/emergency forms, customer profiles and addresses, provider applications, availability, booking acceptance/rejection, quotes and customer approval, job status history, booking-linked messages, notifications, completed-booking reviews, support tickets, admin provider/service/booking management, CSV exports and service summaries. No provider, review or transaction records are seeded.
 
-The site is private by default. A public commercial launch requires an explicit audience change plus completion of the items below.
+Email magic-link sign-in uses Supabase Auth with PKCE and server-side session cookies. The Next.js proxy refreshes sessions; APIs call `auth.getUser()` again before authorization. Client role metadata never grants administrator access. Admin membership comes from `private.admin_emails` and requires a confirmed email. Administrator email addresses are configured privately in the database.
 
-## Architecture
+Database transactions lock booking rows for assignment, quote responses and status changes. PostgreSQL policies protect direct Supabase access as well as the Next.js routes. Only owned completed bookings can produce a verified review. Provider profile/contact data is private; the public provider view contains only approved professional details and real review aggregates.
 
-`src/main.jsx` contains the React pages, forms and dialogs; `src/style.css` contains the responsive design system. `src/worker.js` provides the HTTP API, identity checks and booking rules. `src/catalog.js` holds an initial editable service catalogue and workflow definitions. `migrations/0001_initial.sql` is the reviewed SQL schema. Its generated custom migration and journal in `drizzle/` are used by hosted deployment. The schema declares users, provider profiles, services, addresses, bookings, status history, rejections, quotations, messages, notifications, reviews, payments, support tickets, favourites, settings, audit logs, upload metadata and write-limit windows.
+Chat uses Supabase Realtime with polling as a fallback. Notifications are persisted in Supabase. Email sign-in is the only implemented external email flow; booking email/SMS/WhatsApp delivery is not claimed.
 
-The app builds into a Cloudflare Worker ES module, with the React document and local assets bundled into it. Hosting provisions the D1 `DB` binding. Google Fonts provide DM Sans and Manrope; system fonts are fallbacks. The service illustrations use Microsoft's Fluent Emoji (MIT); the house is an original SVG.
+## Local development
 
-## Source download
-
-Authorized administrators can download the complete source ZIP using the button in the Admin portal. The archive includes code, SQL, assets, tests, setup instructions and an environment example; it excludes credentials, installed dependencies and build output.
-
-## Development and checks
-
-Node 24+ and npm are required.
+Use Node.js 22 or 24.
 
 ```sh
-npm ci --cache /tmp/local-mate-npm
-npm run build
-npm test
+npm ci
+cp .env.example .env.local
+# Add your Supabase project URL and publishable key to .env.local.
+npm run dev
 ```
 
-The tests use an isolated in-memory SQLite database through a D1-compatible adapter and exercise authorization, catalogue initialization, provider eligibility, idempotency, exclusive assignment, rejections, quote approval, message privacy, eligible reviews, payment integrity and address ownership. Test identities and records never reach the hosted database.
+Open `http://localhost:3000`. With no Supabase environment variables, the app renders the starter catalogue and clear setup errors. It does not create local fake accounts, requests or payments.
 
-Managed preview needs the platform `sites-preview` and `cua_repl.js` browser tooling. This workspace did not expose `cua_repl.js`, so browser QA was not performed. Build and API tests are independent of browser availability.
+### Create the Supabase project
 
-## Runtime configuration
+1. Create a Supabase project in your account, preferably in an India region. Keep the database password in a password manager.
+2. Copy its Project URL and publishable key into `.env.local` using the names in `.env.example`.
+3. Apply the migrations and seed using the Supabase integration or CLI:
 
-Set secrets through Sites environment settings. See `.env.example` for names; do not commit actual values. `ADMIN_EMAILS` accepts a comma-separated list. `DB` is a database binding. The migrations must be deployed before traffic reaches a new database. Never expose the Worker directly without Sites' authenticated header boundary.
+```sh
+npx supabase login
+npx supabase link --project-ref YOUR_PROJECT_REF
+npx supabase db push --include-seed
+```
 
-For Razorpay, configure all three values: `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET` and `RAZORPAY_WEBHOOK_SECRET`. Point the signed capture webhook to `/api/payments/webhook`. Test in the gateway's sandbox before using live credentials. `/api/payments/order` creates an order for an owned completed booking; the capture webhook alone verifies a successful payment. The customer checkout UI is not enabled yet.
+The migrations are in `supabase/migrations/` and must be applied in filename order. `supabase/seed.sql` adds the six launch towns and an editable starter catalogue. Administrator membership is configured separately; no personal administrator email is committed to source. It is idempotent and does not overwrite service edits. It never creates customers or service providers.
 
-## Remaining work before production commercial use
+4. In Supabase **Authentication → URL Configuration**, set the production Site URL to the Vercel domain. Allow exactly `https://YOUR_DOMAIN/auth/callback` and `http://localhost:3000/auth/callback` for development. Configure explicit preview callback URLs when testing previews; avoid unrestricted wildcard domains.
+5. Enable email sign-up, email confirmation and magic links. Configure production SMTP before inviting arbitrary customers: Supabase's default mail service has delivery restrictions and rate limits. Its template must use the Supabase confirmation URL so the callback receives a PKCE authorization code.
+6. The project owner must insert the selected administrator email into `private.admin_emails` using the SQL below, then sign in with that confirmed email. Review provider identity/qualifications outside the app before approving their accounts.
 
-This is a working foundation and core booking application, not a completed production platform covering every item in the master brief.
+To add another administrator, a project owner runs the following in Supabase SQL Editor; clients cannot run it:
 
-- Phone OTP/email authentication is not configured; hosted ChatGPT sign-in is implemented.
-- Payment checkout UI, refunds, cash reconciliation, actual commission accounting, payout processing, subscriptions and coupons remain to be implemented. The commission screen currently saves a configuration value only. Statements show completed job values, not bank balances.
-- Secure document/photo/video uploads, document review workflows, provider teams and granular support/super-admin roles remain to be implemented. Do not collect identity/bank documents in plain text forms.
-- Messaging is stored text with polling, not WebSocket realtime. Attachments, read receipts, block/report controls and external email/SMS/WhatsApp/push delivery need integrations.
-- Locations currently use the six initial towns. Map/address autocomplete, distance pricing, service-radius geometry, administrator location management and consent-based GPS tracking are not implemented.
-- Online/offline state gates requests; detailed schedule fields are coordinator-facing information, not an automatic capacity/holiday scheduling engine. Automatic request expiry/reoffer and provider-request timeouts remain to be implemented.
-- Favourites are saved through an API; a favourites management screen remains to be added. Business/team accounts, advanced provider editing, notification deep-links, review moderation and detailed reporting require expansion.
-- Navigation includes basic Malayalam labels. Full Malayalam content and a translation catalogue remain to be completed.
-- Legal policy screens are clearly marked launch drafts. Finalize business identity, contact details, service terms and data-retention/deletion procedures. Perform accessibility/browser testing, security review, load testing and payment sandbox testing before a public launch.
+```sql
+insert into private.admin_emails(email) values (lower('another-admin@example.com')) on conflict do nothing;
+```
 
-These limitations are shown where they affect a decision; unavailable integrations do not manufacture successful transactions, notifications, providers, reviews or GPS positions.
+Never grant admin access through `raw_user_meta_data` or client-side flags.
+
+### Vercel deployment
+
+1. Push the Git repository and tag to GitHub using an authorized account:
+
+```sh
+git push -u origin main
+git push origin v0.2.0
+```
+
+2. Create a Vercel project by importing `nushanhia-tech/home-care`.
+3. Select the **Next.js** preset and keep the root directory at the repository root. `vercel.json` sets `npm ci`, the Next.js build, and region `bom1`.
+4. Add these variables to the appropriate Production/Preview/Development environments:
+
+| Variable | Location | Purpose |
+| --- | --- | --- |
+| `NEXT_PUBLIC_SUPABASE_URL` | Vercel and local development | Supabase Project URL |
+| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Vercel and local development | Browser-safe public key; RLS remains required |
+| `NEXT_PUBLIC_SITE_URL` | Vercel and local development | Exact app origin used in email callbacks |
+| `SUPABASE_SERVICE_ROLE_KEY` | Server only, optional | Verified payment integration only |
+| `RAZORPAY_KEY_ID` | Server only, optional | Payment gateway identity |
+| `RAZORPAY_KEY_SECRET` | Server only, optional | Payment gateway authentication |
+| `RAZORPAY_WEBHOOK_SECRET` | Server only, optional | Signed capture verification |
+
+5. Deploy, update Supabase's production callback URLs, and verify email sign-in and role-specific workflows. Do not point preview deployments at a production database when exercising destructive tests. Use a separate Supabase project or branch.
+
+Vercel's Git integration creates previews for pull requests and deploys changes to `main` to production. No token needs to be committed to GitHub. The CI workflow in `.github/workflows/ci.yml` checks types, database rules and the Next.js build without live credentials.
+
+## Verification
+
+```sh
+npm run typecheck
+npm test
+npm run build
+```
+
+The database suite executes the actual migrations, SQL functions, grants and RLS policies in an isolated embedded PostgreSQL instance (PGlite). It tests admin membership, provider eligibility, exclusive/idempotent assignment, quote approval, conversation privacy, completed-booking reviews, address/favourite/notification policies, server-only payment capture and write rate limits. Test users and records never touch a live Supabase project.
+
+A production Next.js build and a local Chromium desktop/mobile smoke test were also run during migration. To repeat the UI check with Supabase variables unset and the app running, install Python Playwright and run `python3 tests/ui-smoke.py`; the script writes screenshots to `/tmp/local-mate-qa` by default and refuses a configured backend before any sign-in request. Live Supabase email delivery, Realtime subscriptions and Vercel deployment still require connected projects and verification in those accounts.
+
+### Payment integration
+
+`/api/payments/order` creates a gateway order only for an owned completed booking; the amount comes from PostgreSQL. `/api/payments/webhook` verifies Razorpay's HMAC signature, checks the captured INR amount, and calls a service-role-only transaction. Duplicate capture notifications do not duplicate records. Ordinary users cannot mark a payment successful through direct table writes or RPC calls.
+
+Online checkout UI, refunds, cash reconciliation, payouts and commission accounting remain unfinished. Keep payment credentials unset until sandbox testing and the customer checkout are completed. Cash bookings remain pending without reconciliation; completed job value is not an available bank balance.
+
+## Repository structure
+
+```text
+app/                    Next.js layout, client page, API route and auth callback
+lib/api.ts              API handlers, validated sessions and gateway webhook
+lib/supabase/           Cookie-based server client, browser client, payment-only admin client
+src/main.jsx            Existing marketplace UI, adapted for Next.js and Supabase
+src/style.css           Responsive blue/white design system
+src/catalog.js          Starter catalogue and frontend workflow labels
+public/assets/          House illustration and licensed service icons
+supabase/migrations/    PostgreSQL schema, RLS and transactional business rules
+supabase/seed.sql        Initial towns and editable service catalogue
+supabase/config.toml    Local Supabase configuration
+proxy.ts                Supabase session refresh
+.github/workflows/      Automated checks
+vercel.json             Vercel deployment settings
+```
+
+The initial public-schema migration revokes default table/function access before granting the narrow permissions required by clients. Its helper functions use an empty search path and fully qualified references. Private functions are not exposed as client operations. Future database changes should be new migrations; do not rewrite an applied migration.
+
+## Current limits
+
+This is the migrated core application, not every advanced feature in the master brief. Secure document/photo/video uploads, provider teams, granular support/super-admin roles, automated timeouts/reassignment, map/geocoding/radius logic, GPS tracking, full Malayalam translation, favourites management UI, review moderation, coupons/subscriptions, invoice PDFs, refunds/payouts and commercial policy finalization remain to be implemented.
+
+Provider online status and maximum daily acceptance capacity are enforced. Free-text working-day/hour/holiday fields are coordinator-facing details, not a full scheduling engine. A provider application does not itself establish legal identity or qualifications. Policies shown in the UI are launch drafts. Admin commission settings currently save a percentage without initiating charges.
+
+Service icons: Microsoft Fluent Emoji, MIT. See `public/assets/ATTRIBUTION.txt`. The house illustration is an original SVG.
