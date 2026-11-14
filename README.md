@@ -32,6 +32,10 @@ The site is private by default. A public commercial launch requires an explicit 
 
 The app builds into a Cloudflare Worker ES module, with the React document and local assets bundled into it. Hosting provisions the D1 `DB` binding. Google Fonts provide DM Sans and Manrope; system fonts are fallbacks. The service illustrations use Microsoft's Fluent Emoji (MIT); the house is an original SVG.
 
+## Source download
+
+Authorized administrators can download the complete source ZIP using the button in the Admin portal. The archive includes code, SQL, assets, tests, setup instructions and an environment example; it excludes credentials, installed dependencies and build output.
+
 ## Development and checks
 
 Node 24+ and npm are required.

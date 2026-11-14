@@ -1,4 +1,4 @@
-import {html,house,assets} from '../dist/document.js';
+import {html,house,assets,sourceArchive} from '../dist/document.js';
 import {services,locations,workflow} from './catalog.js';
 const uid=()=>crypto.randomUUID();
 const response=(data,status=200)=>new Response(JSON.stringify(data),{status,headers:{'content-type':'application/json','cache-control':'no-store'}});
@@ -16,7 +16,7 @@ async function history(env,booking,actor,status,note=''){await sql(env,'INSERT I
 async function audit(env,actor,action,target=''){await sql(env,'INSERT INTO admin_activity_logs(id,actor_id,action,target_id) VALUES(?,?,?,?)',uid(),actor,action,target).run()}
 async function handler(req,env){
  const url=new URL(req.url),p=url.pathname,method=req.method;
- if(assets[p])return new Response(Uint8Array.from(atob(assets[p]),c=>c.charCodeAt(0)),{headers:{'content-type':'image/png','cache-control':'public,max-age=86400'}});
+ if(assets[p])return new Response(Uint8Array.from(atob(assets[p]),c=>c.charCodeAt(0)),{headers:{'content-type':p.endsWith('.png')?'image/png':'text/plain;charset=utf-8','cache-control':'public,max-age=86400'}});
  if(p==='/assets/house.svg')return new Response(house,{headers:{'content-type':'image/svg+xml','cache-control':'public,max-age=86400'}});
  if(!p.startsWith('/api/'))return new Response(html,{headers:{'content-type':'text/html;charset=utf-8','x-content-type-options':'nosniff','referrer-policy':'strict-origin-when-cross-origin','content-security-policy':"default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; frame-ancestors 'self' https://chatgpt.com https://*.chatgpt.com"}});
  if(p==='/api/status')return response({database:!!env.DB,uploads:!!env.BUCKET,payments:!!(env.RAZORPAY_KEY_ID&&env.RAZORPAY_KEY_SECRET&&env.RAZORPAY_WEBHOOK_SECRET),adminConfigured:!!env.ADMIN_EMAILS});
@@ -149,6 +149,7 @@ async function handler(req,env){
  }
  if(p.startsWith('/api/admin/')){
   if(!admin)fail('Administrator access required. Configure ADMIN_EMAILS for authorized administrators.',403);
+  if(p==='/api/admin/source'&&method==='GET')return new Response(Uint8Array.from(atob(sourceArchive),c=>c.charCodeAt(0)),{headers:{'content-type':'application/zip','content-disposition':'attachment; filename=local-mate-source.zip','cache-control':'no-store'}});
   if(p==='/api/admin/overview')return response({customers:(await one(env,'SELECT COUNT(*) n FROM users')).n,providers:(await one(env,'SELECT COUNT(*) n FROM provider_profiles')).n,pending:(await one(env,"SELECT COUNT(*) n FROM provider_profiles WHERE status='pending'")).n,bookings:(await one(env,'SELECT COUNT(*) n FROM bookings')).n,paid:(await one(env,"SELECT COALESCE(SUM(amount),0) n FROM payments WHERE status='successful'")).n,commission:JSON.parse((await one(env,"SELECT value FROM settings WHERE key='commission'"))?.value||'10')});
   if(p==='/api/admin/providers'&&method==='GET')return response(await rows(env,'SELECT p.*,u.name,u.email,u.phone FROM provider_profiles p JOIN users u ON u.id=p.user_id ORDER BY p.created_at DESC'));
   if(p==='/api/admin/provider'&&method==='POST'){if(!['approved','rejected','suspended','pending'].includes(body.status))fail('Invalid provider status.');await sql(env,'UPDATE provider_profiles SET status=? WHERE user_id=?',body.status,body.user_id).run();await audit(env,userId,'Provider '+body.status,body.user_id);await notify(env,body.user_id,'Your provider application is '+body.status);return response({ok:true})}
