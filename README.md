@@ -28,7 +28,7 @@ The site is private by default. A public commercial launch requires an explicit 
 
 ## Architecture
 
-`src/main.jsx` contains the React pages, forms and dialogs; `src/style.css` contains the responsive design system. `src/worker.js` provides the HTTP API, identity checks and booking rules. `src/catalog.js` holds an initial editable service catalogue and workflow definitions. `migrations/0001_initial.sql` declares users, provider profiles, services, addresses, bookings, status history, rejections, quotations, messages, notifications, reviews, payments, support tickets, favourites, settings, audit logs, upload metadata and write-limit windows.
+`src/main.jsx` contains the React pages, forms and dialogs; `src/style.css` contains the responsive design system. `src/worker.js` provides the HTTP API, identity checks and booking rules. `src/catalog.js` holds an initial editable service catalogue and workflow definitions. `migrations/0001_initial.sql` is the reviewed SQL schema. Its generated custom migration and journal in `drizzle/` are used by hosted deployment. The schema declares users, provider profiles, services, addresses, bookings, status history, rejections, quotations, messages, notifications, reviews, payments, support tickets, favourites, settings, audit logs, upload metadata and write-limit windows.
 
 The app builds into a Cloudflare Worker ES module, with the React document and local assets bundled into it. Hosting provisions the D1 `DB` binding. Google Fonts provide DM Sans and Manrope; system fonts are fallbacks. The service illustrations use Microsoft's Fluent Emoji (MIT); the house is an original SVG.
 

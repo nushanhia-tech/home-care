@@ -7,5 +7,5 @@ const html=`<!doctype html><html lang="en"><head><meta charset="UTF-8"/><meta na
 const assets={};for(const file of await readdir('public/assets')){assets['/assets/'+file]=(await readFile('public/assets/'+file)).toString('base64');}
 await writeFile('dist/document.js',`export const html=${JSON.stringify(html)}; export const house=${JSON.stringify(house)}; export const assets=${JSON.stringify(assets)};`);
 await build({entryPoints:['src/worker.js'],bundle:true,format:'esm',platform:'browser',outfile:'dist/server/index.js',minify:true});
-await mkdir('dist/.openai',{recursive:true});await cp('.openai/hosting.json','dist/.openai/hosting.json');await cp('migrations','dist/migrations',{recursive:true});
+await mkdir('dist/.openai',{recursive:true});await cp('.openai/hosting.json','dist/.openai/hosting.json');await cp('migrations','dist/migrations',{recursive:true});await cp('drizzle','dist/drizzle',{recursive:true});
 console.log('Built React application and Worker API.');
