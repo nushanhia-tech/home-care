@@ -1,0 +1,6 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import {accountConfigurationIssue} from '../lib/account-config.mjs';
+test('rejected or expired server credentials produce actionable setup errors without echoing credentials',()=>{for(const error of [{message:'Invalid API key: private-value'},{code:'PGRST301',message:'JWT expired'}]){const result=accountConfigurationIssue(error,401);assert.equal(result.code,'INVALID_SERVER_KEY');assert.ok(!JSON.stringify(result).includes('private-value'));}});
+test('a public key used for administrative functions is distinguished from missing migrations',()=>{assert.equal(accountConfigurationIssue({code:'42501'},403).code,'SERVER_KEY_PERMISSION');for(const code of ['PGRST202','42P01','42703'])assert.equal(accountConfigurationIssue({code},404).code,'ACCOUNT_SCHEMA_MISSING');});
+test('unexpected database errors return only a bounded reference code, never provider details',()=>{const result=accountConfigurationIssue({code:'42702',message:'private database details'});assert.equal(result.code,'ACCOUNT_SETUP_ERROR');assert.ok(result.message.includes('42702'));assert.ok(!JSON.stringify(result).includes('private database details'));});

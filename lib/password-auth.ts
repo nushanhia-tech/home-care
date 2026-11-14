@@ -3,8 +3,9 @@ import {createHash,randomUUID} from 'node:crypto';
 import {createClient as plainClient,type SupabaseClient} from '@supabase/supabase-js';
 import {administrationConfigured,createServiceAdmin} from './supabase/admin';
 import {ApiError} from './errors';
+import {accountConfigurationIssue} from './account-config.mjs';
 import {normalizeUsername,validUsername,validPassword,reservedUsernames} from './username.mjs';
-async function rpc(client:SupabaseClient,name:string,args:Record<string,unknown>={}){const {data,error}=await client.rpc(name,args);if(error)throw error;return data;}
+async function rpc(client:SupabaseClient,name:string,args:Record<string,unknown>={}){const {data,error,status}=await client.rpc(name,args);if(error){if(error.code==='P0001'||error.code==='23505'||error.code?.startsWith('22'))throw error;const issue=accountConfigurationIssue(error,status);console.error('Account operation failed',{operation:name,code:error.code||'UPSTREAM_ERROR',status});throw new ApiError(issue.message,503,{code:issue.code,operation:name,providerCode:error.code||null});}return data;}
 export function authAdmin(){if(!administrationConfigured())throw new ApiError('Username sign-in needs server setup. Add SUPABASE_SERVICE_ROLE_KEY in Vercel and redeploy.',503);return createServiceAdmin();}
 async function attempt(req:NextRequest,kind:string){
  const client=authAdmin();const ip=req.headers.get('x-vercel-forwarded-for')||req.headers.get('x-forwarded-for')?.split(',')[0]||req.headers.get('x-real-ip')||'local';

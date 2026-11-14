@@ -1,7 +1,7 @@
 import { NextRequest,NextResponse } from 'next/server';
 import { createHmac,timingSafeEqual } from 'node:crypto';
 import { createClient,isSupabaseConfigured } from './supabase/server';
-import { createPaymentAdmin,administrationConfigured } from './supabase/admin';
+import { createPaymentAdmin,administrationConfigured,accountManagementHealth } from './supabase/admin';
 import {ApiError} from './errors';
 import {passwordPublicRoute,updateCredentials,setManagedCredentials,deleteAllData,verifyCurrentPassword} from './password-auth';
 import {sameOrigin} from './request-security.mjs';
@@ -11,14 +11,14 @@ function required(value:unknown,max=2000){if(typeof value!=='string'||!value.tri
 async function checked(request:PromiseLike<any>){const {data,error}=await request;if(error)throw error;return data;}
 const providerDTO=(p:any)=>p?{...p,service_ids:JSON.stringify(p.service_ids),locations:JSON.stringify(p.locations),schedule:JSON.stringify(p.schedule||{})}:null;
 const paymentConfigured=()=>!!(process.env.RAZORPAY_KEY_ID&&process.env.RAZORPAY_KEY_SECRET&&process.env.RAZORPAY_WEBHOOK_SECRET&&process.env.SUPABASE_SERVICE_ROLE_KEY);
-export async function handleAPI(req:NextRequest){try{return await route(req);}catch(error:any){if(error instanceof ApiError)return json({error:error.message},error.status);if(error.code==='42501')return json({error:'You do not have access to this action.'},403);if(error.code==='23505')return json({error:'This request has already been completed. Please refresh.'},409);if(error.code==='P0001')return json({error:error.message},400);if(error.code?.startsWith('22')||error.code==='23514'||error.code==='23503')return json({error:'Please check the values and try again.'},400);if(error.code==='42P01'||error.code==='PGRST205'||error.code==='PGRST202')return json({error:'The Supabase schema is not ready. Apply the database migrations first.'},503);console.error('Local Mate API error:',error.code||error.name);return json({error:'We could not complete this request. Please try again.'},500)}}
+export async function handleAPI(req:NextRequest){try{return await route(req);}catch(error:any){if(error instanceof ApiError)return json({error:error.message,...error.details},error.status);if(error.code==='42501')return json({error:'You do not have access to this action.'},403);if(error.code==='23505')return json({error:'This request has already been completed. Please refresh.'},409);if(error.code==='P0001')return json({error:error.message},400);if(error.code?.startsWith('22')||error.code==='23514'||error.code==='23503')return json({error:'Please check the values and try again.'},400);if(error.code==='42P01'||error.code==='PGRST205'||error.code==='PGRST202')return json({error:'The Supabase schema is not ready. Apply the database migrations first.'},503);console.error('Local Mate API error:',error.code||error.name);return json({error:'We could not complete this request. Please try again.'},500)}}
 async function route(req:NextRequest){
  const p=req.nextUrl.pathname.slice(4),method=req.method;
  if(method!=='GET'&&p!=='/payments/webhook'){
   const origin=req.headers.get('origin');if(!sameOrigin(origin,req.url,req.headers.get('host')))throw new ApiError('This request is not permitted.',403);
   if(!(req.headers.get('content-type')||'').includes('application/json'))throw new ApiError('JSON is required.',415);
  }
- if(p==='/status')return json({database:isSupabaseConfigured(),uploads:false,payments:paymentConfigured(),authentication:'username_password',accountManagement:administrationConfigured(),realtime:isSupabaseConfigured()});
+ if(p==='/status'){const account=await accountManagementHealth();return json({database:isSupabaseConfigured(),uploads:false,payments:paymentConfigured(),authentication:'username_password',accountManagement:account.ready,accountManagementConfigured:account.configured,accountManagementIssue:account.issue,realtime:isSupabaseConfigured()});}
  if(!isSupabaseConfigured()){
   if(p==='/catalog')return json({services:starterServices.map(s=>({...s,available:false})),locations:starterLocations,configured:false});
   if(p==='/providers')return json([]);
