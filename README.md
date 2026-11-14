@@ -19,6 +19,19 @@ Database transactions lock booking rows for assignment, quote responses and stat
 
 Chat uses Supabase Realtime with polling as a fallback. Notifications are persisted in Supabase. Email sign-in is the only implemented external email flow; booking email/SMS/WhatsApp delivery is not claimed.
 
+## One-file setup in Supabase SQL Editor
+
+For dashboard setup, use [supabase/setup.sql](supabase/setup.sql). It combines the schema, permissions, payment functions, supported towns, starter services and private administrator configuration.
+
+1. Open the file and replace `YOUR_ADMIN_EMAIL` on the configuration line near the top with your administrator email.
+2. Paste the **entire** file into a new query in Supabase SQL Editor and click **Run** as the project owner.
+3. The script uses one transaction, backfills existing email accounts, and can be rerun for this schema without deleting accounts, bookings or catalogue edits. It does not create fake providers or accounts.
+4. Continue with Vercel environment variables and Supabase Auth callback URLs; SQL cannot configure those dashboard settings.
+
+Use this one-file setup **or** the CLI migration workflow below. If moving from manual setup to CLI migrations, first mark the two initial migration versions as applied using `supabase migration repair`, after verifying that their schema is installed.
+
+The checked-in file is generated from the migrations. Run `npm run db:setup:generate` after adding a migration, review the generated SQL, and run `npm run db:setup:check` to verify it is current. Existing migrations stay immutable.
+
 ## Local development
 
 Use Node.js 22 or 24.
