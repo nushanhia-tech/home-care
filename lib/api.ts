@@ -1,11 +1,12 @@
 import { NextRequest,NextResponse } from 'next/server';
 import { createHmac,timingSafeEqual } from 'node:crypto';
 import { createClient,isSupabaseConfigured } from './supabase/server';
-import { createPaymentAdmin } from './supabase/admin';
+import { createPaymentAdmin,administrationConfigured } from './supabase/admin';
+import {ApiError} from './errors';
+import {passwordPublicRoute,updateCredentials,setManagedCredentials,deleteAllData,verifyCurrentPassword} from './password-auth';
 import {sameOrigin} from './request-security.mjs';
 import { services as starterServices,locations as starterLocations } from '../src/catalog';
 const json=(data:unknown,status=200)=>NextResponse.json(data,{status,headers:{'Cache-Control':'no-store'}});
-class ApiError extends Error{constructor(message:string,public status=400){super(message)}}
 function required(value:unknown,max=2000){if(typeof value!=='string'||!value.trim()||value.length>max)throw new ApiError('Please check the required fields.');return value.trim()}
 async function checked(request:PromiseLike<any>){const {data,error}=await request;if(error)throw error;return data;}
 const providerDTO=(p:any)=>p?{...p,service_ids:JSON.stringify(p.service_ids),locations:JSON.stringify(p.locations),schedule:JSON.stringify(p.schedule||{})}:null;
@@ -17,10 +18,11 @@ async function route(req:NextRequest){
   const origin=req.headers.get('origin');if(!sameOrigin(origin,req.url,req.headers.get('host')))throw new ApiError('This request is not permitted.',403);
   if(!(req.headers.get('content-type')||'').includes('application/json'))throw new ApiError('JSON is required.',415);
  }
- if(p==='/status')return json({database:isSupabaseConfigured(),uploads:false,payments:paymentConfigured(),authentication:'supabase',realtime:isSupabaseConfigured()});
+ if(p==='/status')return json({database:isSupabaseConfigured(),uploads:false,payments:paymentConfigured(),authentication:'username_password',accountManagement:administrationConfigured(),realtime:isSupabaseConfigured()});
  if(!isSupabaseConfigured()){
   if(p==='/catalog')return json({services:starterServices.map(s=>({...s,available:false})),locations:starterLocations,configured:false});
   if(p==='/providers')return json([]);
+  if(p==='/website')return json({content:{},maintenance_mode:false,customer_portal_enabled:true,provider_portal_enabled:true,registration_enabled:true,bookings_enabled:true});
   throw new ApiError('Supabase is not connected yet. Add the project URL and publishable key in Vercel environment settings.',503);
  }
  if(p==='/payments/webhook'&&method==='POST')return paymentWebhook(req);
@@ -29,13 +31,8 @@ async function route(req:NextRequest){
   if(Number(req.headers.get('content-length')||0)>100000)throw new ApiError('Request is too large.',413);const raw=await req.text();if(raw.length>100000)throw new ApiError('Request is too large.',413);
   try{body=JSON.parse(raw)}catch{throw new ApiError('Invalid JSON request.')}
  }
- if(p==='/auth/signin'&&method==='POST'){
-  const email=required(body.email,254);if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))throw new ApiError('Enter a valid email address.');
-  const origin=process.env.NEXT_PUBLIC_SITE_URL||req.headers.get('origin')||req.nextUrl.origin;
-  const {error}=await supabase.auth.signInWithOtp({email,options:{emailRedirectTo:new URL('/auth/callback',origin).toString(),shouldCreateUser:true}});
-  if(error){if(error.status===429)throw new ApiError('Please wait before requesting another sign-in email.',429);throw new ApiError('The sign-in email could not be requested. Check Supabase email settings and try again.',503)}
-  return json({ok:true});
- }
+ const passwordResponse=await passwordPublicRoute(req,p,body,supabase);if(passwordResponse)return passwordResponse;
+ if(p==='/website')return json(await checked(supabase.from('website_configuration').select('*').eq('id',true).single()));
  if(p==='/catalog'){
   const [data,areas]=await Promise.all([checked(supabase.from('services').select('*').eq('active',true).order('category').order('name')),checked(supabase.from('locations').select('name').eq('active',true).order('name'))]);
   return json({services:data.length?data:starterServices.map(s=>({...s,available:false})),locations:areas.map((l:any)=>l.name),configured:data.length>0});
@@ -44,12 +41,19 @@ async function route(req:NextRequest){
  const {data:{user},error:authError}=await supabase.auth.getUser();
  if(authError||!user)throw new ApiError('Please sign in to continue.',401);
  if(p==='/auth/signout'&&method==='POST'){const {error}=await supabase.auth.signOut();if(error)throw error;return json({ok:true})}
- const [profile,provider,admin]=await Promise.all([checked(supabase.from('users').select('*').eq('id',user.id).single()),checked(supabase.from('provider_profiles').select('*').eq('user_id',user.id).maybeSingle()),checked(supabase.rpc('is_admin'))]);
- if(p==='/me')return json({...profile,email:user.email,provider:providerDTO(provider),admin:!!admin});
+ const [profile,provider,admin,login]=await Promise.all([checked(supabase.from('users').select('*').eq('id',user.id).single()),checked(supabase.from('provider_profiles').select('*').eq('user_id',user.id).maybeSingle()),checked(supabase.rpc('is_admin')),checked(supabase.rpc('login_state'))]);
+ if(p==='/me')return json({...profile,email:user.email,username:login?.username||profile.username,must_change_password:!!login?.must_change_password,provider:providerDTO(provider),admin:!!admin});
+ if(profile.is_active===false)throw new ApiError('This account has been suspended. Contact support.',403);
+ if(p==='/auth/account'&&method==='POST')return json(await updateCredentials(req,user,login,body));
+ if(login?.must_change_password)throw new ApiError('Change your temporary password before continuing.',403);
+ const config=await checked(supabase.from('website_configuration').select('*').eq('id',true).single());
+ if(!admin&&config.maintenance_mode)throw new ApiError('The website is temporarily paused.',503);
+ if(!admin&&!config.provider_portal_enabled&&(p.startsWith('/provider/')||req.nextUrl.searchParams.get('role')==='provider'))throw new ApiError('The provider portal is temporarily paused.',403);
  if(p==='/profile'&&method==='POST'){await checked(supabase.rpc('update_profile',{p_name:required(body.name,100),p_phone:required(body.phone,20)}));return json({ok:true})}
  if(p==='/setup'&&method==='POST'){
   if(!admin)throw new ApiError('Administrator access required.',403);
   const existing=await checked(supabase.from('services').select('id'));const ids=new Set(existing.map((s:any)=>s.id));
+  for(const name of starterLocations)await checked(supabase.rpc('admin_save_location',{p_name:name,p_active:true}));
   for(const s of starterServices.filter(s=>!ids.has(s.id)))await checked(supabase.rpc('admin_save_service',{p_data:s}));
   return json({ok:true});
  }
@@ -115,6 +119,18 @@ async function route(req:NextRequest){
  }
  if(p.startsWith('/admin/')){
   if(!admin)throw new ApiError('Administrator access required.',403);
+  if(p==='/admin/website'){
+   if(method==='GET')return json(config);
+   if(method==='POST'){await checked(supabase.rpc('admin_save_website',{p_data:body}));return json({ok:true});}
+  }
+  if(p==='/admin/locations'){
+   if(method==='GET')return json(await checked(supabase.from('locations').select('*').order('name')));
+   if(method==='POST'){await checked(supabase.rpc('admin_save_location',{p_name:required(body.name,100),p_active:body.active===true}));return json({ok:true});}
+  }
+  if(p==='/admin/account-status'&&method==='POST'){await checked(supabase.rpc('admin_account_status',{p_user:body.user_id,p_active:body.is_active===true}));return json({ok:true});}
+  if(p==='/admin/credentials'&&method==='POST')return json(await setManagedCredentials(user.id,body));
+  if(p==='/admin/backup'&&method==='POST')return json(await checked(supabase.rpc('export_marketplace')));
+  if(p==='/admin/reset'&&method==='POST')return json(await deleteAllData(req,user,supabase,body));
   if(p==='/admin/overview'){
    const [customers,pros,pending,bookings,paid,commission]=await Promise.all([supabase.from('users').select('*',{count:'exact',head:true}),supabase.from('provider_profiles').select('*',{count:'exact',head:true}),supabase.from('provider_profiles').select('*',{count:'exact',head:true}).eq('status','pending'),supabase.from('bookings').select('*',{count:'exact',head:true}),supabase.from('payments').select('amount').eq('status','successful'),supabase.from('settings').select('value').eq('key','commission').maybeSingle()]);
    for(const result of [customers,pros,pending,bookings,paid,commission])if(result.error)throw result.error;

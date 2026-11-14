@@ -33,7 +33,9 @@ const seed=await readFile(new URL('supabase/seed.sql',root),'utf8');
 const output=`-- LOCAL MATE: COMPLETE SUPABASE SQL EDITOR SETUP
 -- Generated from the checked-in migrations and starter catalogue.
 -- Run this entire file in Supabase Dashboard > SQL Editor as the project owner.
--- The designated administrator is included by the bootstrap migration.
+-- The owner-selected legacy administrator is included by the bootstrap migration.
+-- Username admin is provisioned at first sign-in after the server-only key is configured;
+-- the initial password must be changed before administrator controls unlock.
 -- Optionally set an additional administrator email below; otherwise leave it blank.
 -- Can be rerun for this schema; preserves existing accounts, bookings and service edits.
 -- This configures the database only. Add environment variables and Auth callback URLs separately.

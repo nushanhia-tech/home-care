@@ -18,8 +18,9 @@ with sync_playwright() as p:
  assert page.locator('.listing-grid .service-card').count()==1
  page.locator('.service-card').click()
  page.get_by_role('button',name='Plan your service').click()
- page.get_by_role('textbox',name='Your email').fill('ui-test@example.invalid')
- page.get_by_role('button',name='Email me a sign-in link').click()
+ page.get_by_role('textbox',name='Username',exact=True).fill('ui_test')
+ page.get_by_label('Password',exact=True).fill('temporary-test-password')
+ page.get_by_role('button',name='Sign in',exact=True).click()
  page.get_by_role('alert').filter(has_text='Supabase is not connected yet').wait_for()
  page.get_by_role('button',name='Close dialog').click()
  page.get_by_role('button',name='Local Mate home').click()

@@ -1,55 +1,63 @@
-# Local Mate · Next.js + Supabase + Vercel
+# Local Mate
 
-Local Mate is a local-services marketplace starting in Pattambi, Kerala. This version preserves the blue-and-white interface and the earlier Git history, and migrates the application from Sites/Cloudflare D1 to the requested stack.
+A local-services marketplace built with Next.js, Supabase and Vercel. The repository preserves the earlier Local Mate history and blue-and-white interface.
 
-- **Frontend and server:** Next.js 16 App Router, React, TypeScript server code.
-- **Backend:** Supabase PostgreSQL, Auth, Row Level Security and Realtime.
-- **Version control:** `https://github.com/nushanhia-tech/home-care`.
-- **Deployment target:** Vercel, Mumbai region.
+## Set up username/password login
 
-No live Supabase or Vercel project is hardcoded into the source. Projects and environment settings must be provisioned before account/booking features can run. The earlier private Sites publication remains a separate deployment and does not receive these Next.js changes.
+1. Open [supabase/setup.sql](supabase/setup.sql), copy the **entire** file into your Supabase project's SQL Editor, and run it as the project owner. The file installs the schema, row-level security, transactional booking workflows, administrator bootstrap state, website settings and initial services/towns. It can be rerun for this schema without deleting customer records or edited catalogue prices.
+2. In Vercel → Project → Settings → Environment Variables, configure:
 
-## Working implementation
+| Variable | Purpose |
+| --- | --- |
+| `NEXT_PUBLIC_SUPABASE_URL` | Supabase Project URL, without `/rest/v1/` |
+| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Browser-safe project publishable key |
+| `NEXT_PUBLIC_SITE_URL` | Production website origin |
+| `SUPABASE_SERVICE_ROLE_KEY` | **Server-only** Supabase service-role/secret key for account management |
+| `ADMIN_INITIAL_PASSWORD` | Optional initial administrator password; defaults to the requested `admin123` |
 
-The UI includes service browsing/search, a town selector, distinct service/quotation/transport/goods/rental/emergency forms, customer profiles and addresses, provider applications, availability, booking acceptance/rejection, quotes and customer approval, job status history, booking-linked messages, notifications, completed-booking reviews, support tickets, admin provider/service/booking management, CSV exports and service summaries. No provider, review or transaction records are seeded.
+Never prefix the service-role key with `NEXT_PUBLIC_`, include it in source, or put it in a publicly downloadable file. `.env.example` and `downloads/final.env` contain placeholders only for server secrets. Fill the real server key directly in Vercel. Redeploy after changing environment variables.
 
-Email magic-link sign-in uses Supabase Auth with PKCE and server-side session cookies. The Next.js proxy refreshes sessions; APIs call `auth.getUser()` again before authorization. Client role metadata never grants administrator access. Admin membership comes from `private.admin_emails` and requires a confirmed email. Administrator membership is enforced in the private database table. The owner-designated address is added by the bootstrap administrator migration.
+3. Open `/admin` on the deployed website. Sign in with username **admin** and the configured initial password (**admin123** by default). The server provisions this account once using Supabase Auth's supported Admin API. It never resets an existing administrator to the default password.
+4. At the first login, change the temporary password to a different password of at least 12 characters before administrator controls unlock. You can change the username at the same time or later in Settings.
 
-Database transactions lock booking rows for assignment, quote responses and status changes. PostgreSQL policies protect direct Supabase access as well as the Next.js routes. Only owned completed bookings can produce a verified review. Provider profile/contact data is private; the public provider view contains only approved professional details and real review aggregates.
+Email-link sign-in and email verification are not part of the application login flow. Customers register with a name, username and password. The server creates confirmed Supabase Auth accounts using internal identifiers and checks passwords through Supabase Auth. No verification emails are sent. Supabase Auth sessions and RLS still protect all account data; the application never accepts a client-provided administrator role.
 
-Chat uses Supabase Realtime with polling as a fallback. Notifications are persisted in Supabase. Email sign-in is the only implemented external email flow; booking email/SMS/WhatsApp delivery is not claimed.
+Existing customer data and Auth accounts are preserved by the migration. Older email-only accounts need a username and temporary password assigned through Admin → Users before they can use the new sign-in screen. Those users must change their temporary password after login. The earlier owner-selected email allowlist remains for existing authorized identities; it does not replace password authentication.
 
-## One-file setup in Supabase SQL Editor
+## Administrator controls
 
-For dashboard setup, use [supabase/setup.sql](supabase/setup.sql). It combines the schema, permissions, payment functions, supported towns, starter services and private administrator configuration.
+- Overview, bookings, provider approval/suspension, manual provider assignment and service management.
+- Users: suspend/reactivate accounts and assign usernames/temporary passwords. An administrator cannot suspend their own active account through this screen.
+- Website & portals: website name, announcement, hero text, tagline, contact information, About, FAQ and policy text. Pause the public website, customer/provider portals, registration or new bookings. Administrator access remains available during maintenance. New-booking and provider-job restrictions are also enforced in PostgreSQL.
+- Locations: add, activate and pause service towns.
+- Settings: change your own username/password using your current password; save the commission percentage. Commission settings do not initiate charges or payouts.
+- Backup: download a JSON export of marketplace profiles, providers, catalogue, locations, bookings, messages, reviews, payments, support, website settings and activity logs. **Passwords, Auth sessions, storage files and project secrets are excluded.** For a full infrastructure restore, use Supabase's project backup tools. There is no in-app Auth/password restore from the JSON export.
+- Delete all data: requires your current password and the exact phrase `DELETE ALL DATA`. Removes marketplace records and all other Auth accounts while preserving the current administrator login. The website and registration stay paused until you reopen them in Website & portals. Account deletion uses Supabase's Admin API. A partial account-cleanup failure is reported and can be retried; it is never reported as a fully successful wipe. Removing payment records does not refund bank transactions. Download an appropriate backup before using this option.
 
-1. Open the file. The designated administrator email is included in the bootstrap migration; no placeholder needs replacing. The configuration line near the top can optionally add a second administrator.
-2. Paste the **entire** file into a new query in Supabase SQL Editor and click **Run** as the project owner.
-3. The script uses one transaction, backfills existing email accounts, and can be rerun for this schema without deleting accounts, bookings or catalogue edits. It does not create fake providers or accounts.
-4. Continue with Vercel environment variables and Supabase Auth callback URLs; SQL cannot configure those dashboard settings.
+Adding the reset feature does not execute it. No hosted data is removed by installing these migrations or deploying the application.
 
-Use this one-file setup **or** the CLI migration workflow below. If moving from manual setup to CLI migrations, first mark the installed migration versions as applied using `supabase migration repair`, after verifying that their schema is installed.
+## Customer and provider workflows
 
-The checked-in file is generated from the migrations. Run `npm run db:setup:generate` after adding a migration, review the generated SQL, and run `npm run db:setup:check` to verify it is current. Existing migrations stay immutable.
+Customers can browse/search services, select a town, manage profiles/addresses, request service-specific bookings, approve quotes, view status history, message assigned professionals, submit completed-booking reviews, and open support tickets. Providers apply for approval, control online availability, accept/reject matching requests, send quotations and progress jobs. No fabricated providers, reviews or transactions are seeded.
+
+Booking assignment and quotation responses use PostgreSQL row locks. A job has one primary assigned provider. The public provider view omits private contact details. Chat uses Supabase Realtime with a polling fallback. In-app notifications are persisted; external SMS/WhatsApp/push delivery is not claimed.
 
 ## Local development
 
-Use Node.js 22 or 24.
+Use Node.js 22 or 24:
 
 ```sh
 npm ci
 cp .env.example .env.local
-# Add your Supabase project URL and publishable key to .env.local.
+# Fill Supabase values and the server-only account-management key.
 npm run dev
 ```
 
-Open `http://localhost:3000`. With no Supabase environment variables, the app renders the starter catalogue and clear setup errors. It does not create local fake accounts, requests or payments.
+Without Supabase configuration, the starter catalogue renders and private actions show setup errors. Without the server-only key, username registration, login/bootstrap and credential management remain unavailable. No fake local accounts or successful payments are created.
 
-### Create the Supabase project
+### Supabase CLI alternative
 
-1. Create a Supabase project in your account, preferably in an India region. Keep the database password in a password manager.
-2. Copy its Project URL and publishable key into `.env.local` using the names in `.env.example`.
-3. Apply the migrations and seed using the Supabase integration or CLI:
+Use either the one-file SQL Editor setup or the CLI workflow:
 
 ```sh
 npx supabase login
@@ -57,89 +65,42 @@ npx supabase link --project-ref YOUR_PROJECT_REF
 npx supabase db push --include-seed
 ```
 
-The migrations are in `supabase/migrations/` and must be applied in filename order. `supabase/seed.sql` adds the six launch towns and an editable starter catalogue. The bootstrap migration also adds the owner-designated administrator allowlist entry. It is idempotent and does not overwrite service edits. It never creates customers or service providers.
+If switching to CLI after manual setup, mark the already installed migration versions applied using `supabase migration repair` after verifying the schema. Do not rewrite applied migrations. `supabase/seed.sql` is idempotent and preserves service edits.
 
-4. In Supabase **Authentication → URL Configuration**, set the production Site URL to the Vercel domain. Allow exactly `https://YOUR_DOMAIN/auth/callback` and `http://localhost:3000/auth/callback` for development. Configure explicit preview callback URLs when testing previews; avoid unrestricted wildcard domains.
-5. Enable email sign-up, email confirmation and magic links. Configure production SMTP before inviting arbitrary customers: Supabase's default mail service has delivery restrictions and rate limits. Its template must use the Supabase confirmation URL so the callback receives a PKCE authorization code.
-6. Sign in with the confirmed owner-designated administrator email. Additional administrators can be added by the project owner using the SQL below. Review provider identity/qualifications outside the app before approving their accounts.
-
-To add another administrator, a project owner runs the following in Supabase SQL Editor; clients cannot run it:
-
-```sql
-insert into private.admin_emails(email) values (lower('another-admin@example.com')) on conflict do nothing;
-```
-
-Never grant admin access through `raw_user_meta_data` or client-side flags.
-
-### Vercel deployment
-
-1. Push the Git repository and tag to GitHub using an authorized account:
+The single setup file is generated from migrations:
 
 ```sh
-git push -u origin main
-git push origin v0.2.0
+npm run db:setup:generate
+npm run db:setup:check
 ```
 
-2. Create a Vercel project by importing `nushanhia-tech/home-care`.
-3. Select the **Next.js** preset and keep the root directory at the repository root. `vercel.json` sets `npm ci`, the Next.js build, and region `bom1`.
-4. Add these variables to the appropriate Production/Preview/Development environments:
+## Vercel and Git
 
-| Variable | Location | Purpose |
-| --- | --- | --- |
-| `NEXT_PUBLIC_SUPABASE_URL` | Vercel and local development | Supabase Project URL |
-| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Vercel and local development | Browser-safe public key; RLS remains required |
-| `NEXT_PUBLIC_SITE_URL` | Vercel and local development | Exact app origin used in email callbacks |
-| `SUPABASE_SERVICE_ROLE_KEY` | Server only, optional | Verified payment integration only |
-| `RAZORPAY_KEY_ID` | Server only, optional | Payment gateway identity |
-| `RAZORPAY_KEY_SECRET` | Server only, optional | Payment gateway authentication |
-| `RAZORPAY_WEBHOOK_SECRET` | Server only, optional | Signed capture verification |
+Import `nushanhia-tech/home-care` with the Next.js preset and repository root. `vercel.json` specifies `npm ci`, the production build and Mumbai region. Add the environment variables above, then deploy. The Git integration deploys changes pushed to `main`; GitHub Actions checks types, SQL setup consistency, tests and the build.
 
-5. Deploy, update Supabase's production callback URLs, and verify email sign-in and role-specific workflows. Do not point preview deployments at a production database when exercising destructive tests. Use a separate Supabase project or branch.
-
-Vercel's Git integration creates previews for pull requests and deploys changes to `main` to production. No token needs to be committed to GitHub. The CI workflow in `.github/workflows/ci.yml` checks types, database rules and the Next.js build without live credentials.
+The original private Sites publication is separate and does not receive these Next.js deployments. Real Supabase/Vercel settings require access to those accounts; publishing source or SQL does not itself apply a hosted database migration.
 
 ## Verification
 
 ```sh
 npm run typecheck
+npm run db:setup:check
 npm test
 npm run build
 ```
 
-The database suite executes the actual migrations, SQL functions, grants and RLS policies in an isolated embedded PostgreSQL instance (PGlite). It tests admin membership, provider eligibility, exclusive/idempotent assignment, quote approval, conversation privacy, completed-booking reviews, address/favourite/notification policies, server-only payment capture and write rate limits. Test users and records never touch a live Supabase project.
+The SQL suite runs the actual migrations and row-level security in isolated embedded PostgreSQL (PGlite). It covers authorization, idempotent/exclusive booking assignment, quotation approval, conversation privacy, eligible reviews, username mappings, one-time admin bootstrap, required password rotation, suspension, portal switches, backups and reset confirmation. Test records never reach the live database.
 
-A production Next.js build and a local Chromium desktop/mobile smoke test were also run during migration. To repeat the UI check with Supabase variables unset and the app running, install Python Playwright and run `python3 tests/ui-smoke.py`; the script writes screenshots to `/tmp/local-mate-qa` by default and refuses a configured backend before any sign-in request. Live Supabase email delivery, Realtime subscriptions and Vercel deployment still require connected projects and verification in those accounts.
+`tests/ui-smoke.py` checks the unconfigured-backend experience, search, responsive layouts and login dialogs. `tests/admin-ui.py` uses mocked API responses to check username login, first-login password changes, website controls, backup download and explicit reset confirmation. These tests never send emails or delete hosted data. Live password authentication and account creation still require the configured server key and must be verified against the connected Supabase project.
 
-### Payment integration
+## Optional payments
 
-`/api/payments/order` creates a gateway order only for an owned completed booking; the amount comes from PostgreSQL. `/api/payments/webhook` verifies Razorpay's HMAC signature, checks the captured INR amount, and calls a service-role-only transaction. Duplicate capture notifications do not duplicate records. Ordinary users cannot mark a payment successful through direct table writes or RPC calls.
+Configure `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET` and `RAZORPAY_WEBHOOK_SECRET` server-side only. `/api/payments/order` reads the amount from an owned completed booking. `/api/payments/webhook` validates Razorpay's signed capture, checks the exact INR amount, and calls a service-role-only transaction. Duplicate capture events do not duplicate payment records. Browser requests cannot mark payments successful.
 
-Online checkout UI, refunds, cash reconciliation, payouts and commission accounting remain unfinished. Keep payment credentials unset until sandbox testing and the customer checkout are completed. Cash bookings remain pending without reconciliation; completed job value is not an available bank balance.
+Online checkout UI, refunds, cash reconciliation, payout processing and actual commission accounting remain unfinished. Cash bookings stay pending without reconciliation. Completed job value is not a bank balance.
 
-## Repository structure
+## Remaining platform limits
 
-```text
-app/                    Next.js layout, client page, API route and auth callback
-lib/api.ts              API handlers, validated sessions and gateway webhook
-lib/supabase/           Cookie-based server client, browser client, payment-only admin client
-src/main.jsx            Existing marketplace UI, adapted for Next.js and Supabase
-src/style.css           Responsive blue/white design system
-src/catalog.js          Starter catalogue and frontend workflow labels
-public/assets/          House illustration and licensed service icons
-supabase/migrations/    PostgreSQL schema, RLS and transactional business rules
-supabase/seed.sql        Initial towns and editable service catalogue
-supabase/config.toml    Local Supabase configuration
-proxy.ts                Supabase session refresh
-.github/workflows/      Automated checks
-vercel.json             Vercel deployment settings
-```
+Secure document/photo/video uploads, provider teams, granular support/super-admin roles, automatic request expiry/reassignment, maps/geocoding/service-radius logic, GPS tracking, full Malayalam translation, review moderation, coupons/subscriptions, PDF invoices and a full backup-restore UI remain to be implemented. Working-day/hour/holiday text is coordinator-facing; provider online state and daily acceptance capacity are enforced. Finalize legal policies before commercial launch.
 
-The initial public-schema migration revokes default table/function access before granting the narrow permissions required by clients. Its helper functions use an empty search path and fully qualified references. Private functions are not exposed as client operations. Future database changes should be new migrations; do not rewrite an applied migration.
-
-## Current limits
-
-This is the migrated core application, not every advanced feature in the master brief. Secure document/photo/video uploads, provider teams, granular support/super-admin roles, automated timeouts/reassignment, map/geocoding/radius logic, GPS tracking, full Malayalam translation, favourites management UI, review moderation, coupons/subscriptions, invoice PDFs, refunds/payouts and commercial policy finalization remain to be implemented.
-
-Provider online status and maximum daily acceptance capacity are enforced. Free-text working-day/hour/holiday fields are coordinator-facing details, not a full scheduling engine. A provider application does not itself establish legal identity or qualifications. Policies shown in the UI are launch drafts. Admin commission settings currently save a percentage without initiating charges.
-
-Service icons: Microsoft Fluent Emoji, MIT. See `public/assets/ATTRIBUTION.txt`. The house illustration is an original SVG.
+Service icons: Microsoft Fluent Emoji, MIT; see `public/assets/ATTRIBUTION.txt`. The house illustration is an original SVG.
