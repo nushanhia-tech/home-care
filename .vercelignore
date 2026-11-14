@@ -1,5 +1,6 @@
-.git
-supabase/
-tests/
-README.md
-CHANGELOG.md
+# Anchor deployment exclusions to the repository root so lib/supabase stays available.
+/.git/
+/supabase/
+/tests/
+/README.md
+/CHANGELOG.md
