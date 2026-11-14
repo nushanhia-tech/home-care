@@ -13,7 +13,7 @@ No live Supabase or Vercel project is hardcoded into the source. Projects and en
 
 The UI includes service browsing/search, a town selector, distinct service/quotation/transport/goods/rental/emergency forms, customer profiles and addresses, provider applications, availability, booking acceptance/rejection, quotes and customer approval, job status history, booking-linked messages, notifications, completed-booking reviews, support tickets, admin provider/service/booking management, CSV exports and service summaries. No provider, review or transaction records are seeded.
 
-Email magic-link sign-in uses Supabase Auth with PKCE and server-side session cookies. The Next.js proxy refreshes sessions; APIs call `auth.getUser()` again before authorization. Client role metadata never grants administrator access. Admin membership comes from `private.admin_emails` and requires a confirmed email. Administrator email addresses are configured privately in the database.
+Email magic-link sign-in uses Supabase Auth with PKCE and server-side session cookies. The Next.js proxy refreshes sessions; APIs call `auth.getUser()` again before authorization. Client role metadata never grants administrator access. Admin membership comes from `private.admin_emails` and requires a confirmed email. Administrator membership is enforced in the private database table. The owner-designated address is added by the bootstrap administrator migration.
 
 Database transactions lock booking rows for assignment, quote responses and status changes. PostgreSQL policies protect direct Supabase access as well as the Next.js routes. Only owned completed bookings can produce a verified review. Provider profile/contact data is private; the public provider view contains only approved professional details and real review aggregates.
 
@@ -23,12 +23,12 @@ Chat uses Supabase Realtime with polling as a fallback. Notifications are persis
 
 For dashboard setup, use [supabase/setup.sql](supabase/setup.sql). It combines the schema, permissions, payment functions, supported towns, starter services and private administrator configuration.
 
-1. Open the file and replace `YOUR_ADMIN_EMAIL` on the configuration line near the top with your administrator email.
+1. Open the file. The designated administrator email is included in the bootstrap migration; no placeholder needs replacing. The configuration line near the top can optionally add a second administrator.
 2. Paste the **entire** file into a new query in Supabase SQL Editor and click **Run** as the project owner.
 3. The script uses one transaction, backfills existing email accounts, and can be rerun for this schema without deleting accounts, bookings or catalogue edits. It does not create fake providers or accounts.
 4. Continue with Vercel environment variables and Supabase Auth callback URLs; SQL cannot configure those dashboard settings.
 
-Use this one-file setup **or** the CLI migration workflow below. If moving from manual setup to CLI migrations, first mark the two initial migration versions as applied using `supabase migration repair`, after verifying that their schema is installed.
+Use this one-file setup **or** the CLI migration workflow below. If moving from manual setup to CLI migrations, first mark the installed migration versions as applied using `supabase migration repair`, after verifying that their schema is installed.
 
 The checked-in file is generated from the migrations. Run `npm run db:setup:generate` after adding a migration, review the generated SQL, and run `npm run db:setup:check` to verify it is current. Existing migrations stay immutable.
 
@@ -57,11 +57,11 @@ npx supabase link --project-ref YOUR_PROJECT_REF
 npx supabase db push --include-seed
 ```
 
-The migrations are in `supabase/migrations/` and must be applied in filename order. `supabase/seed.sql` adds the six launch towns and an editable starter catalogue. Administrator membership is configured separately; no personal administrator email is committed to source. It is idempotent and does not overwrite service edits. It never creates customers or service providers.
+The migrations are in `supabase/migrations/` and must be applied in filename order. `supabase/seed.sql` adds the six launch towns and an editable starter catalogue. The bootstrap migration also adds the owner-designated administrator allowlist entry. It is idempotent and does not overwrite service edits. It never creates customers or service providers.
 
 4. In Supabase **Authentication → URL Configuration**, set the production Site URL to the Vercel domain. Allow exactly `https://YOUR_DOMAIN/auth/callback` and `http://localhost:3000/auth/callback` for development. Configure explicit preview callback URLs when testing previews; avoid unrestricted wildcard domains.
 5. Enable email sign-up, email confirmation and magic links. Configure production SMTP before inviting arbitrary customers: Supabase's default mail service has delivery restrictions and rate limits. Its template must use the Supabase confirmation URL so the callback receives a PKCE authorization code.
-6. The project owner must insert the selected administrator email into `private.admin_emails` using the SQL below, then sign in with that confirmed email. Review provider identity/qualifications outside the app before approving their accounts.
+6. Sign in with the confirmed owner-designated administrator email. Additional administrators can be added by the project owner using the SQL below. Review provider identity/qualifications outside the app before approving their accounts.
 
 To add another administrator, a project owner runs the following in Supabase SQL Editor; clients cannot run it:
 

@@ -2,7 +2,7 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile,readdir} from 'node:fs/promises';
 import {PGlite} from '@electric-sql/pglite';
-const admin='setup-admin@test.example';
+const admin='mueenptb@gmail.com';
 const account='10000000-0000-4000-8000-000000000001';
 async function bootstrap(db){
  await db.exec(`create role anon;create role authenticated;create role service_role bypassrls;create schema auth;grant usage on schema auth,public to anon,authenticated,service_role;
@@ -16,14 +16,18 @@ test('single-file Supabase setup installs fresh, backfills accounts, and can rer
  const db=new PGlite();
  try{
   await bootstrap(db);
-  await db.query('insert into auth.users(id,email) values($1,$2)',[account,admin]);
-  const setup=(await readFile(new URL('../supabase/setup.sql',import.meta.url),'utf8')).replace("= 'YOUR_ADMIN_EMAIL'","= '"+admin+"'");
+  await db.query('insert into auth.users(id,email,email_confirmed_at) values($1,$2,null)',[account,admin]);
+  const setup=await readFile(new URL('../supabase/setup.sql',import.meta.url),'utf8');
   await run(db,setup);
   assert.equal((await db.query('select count(*) n from public.services')).rows[0].n,18);
   assert.equal((await db.query('select count(*) n from public.locations')).rows[0].n,6);
   assert.equal((await db.query('select count(*) n from public.provider_profiles')).rows[0].n,0);
   assert.equal((await db.query('select email from public.users where id=$1',[account])).rows[0].email,admin);
   assert.equal((await db.query('select email from private.admin_emails')).rows[0].email,admin);
+  const administrator=()=>db.transaction(async tx=>{await tx.exec('set local role authenticated');await tx.query("select set_config('request.jwt.claim.sub',$1,true)",[account]);return (await tx.query('select public.is_admin() allowed')).rows[0].allowed});
+  assert.equal(await administrator(),false,'Unconfirmed email must not grant administrator access.');
+  await db.query('update auth.users set email_confirmed_at=now() where id=$1',[account]);
+  assert.equal(await administrator(),true,'Confirmed designated email grants administrator access.');
   await db.query("update public.services set price=350 where id='plumbing'");
   await run(db,setup);
   assert.equal((await db.query("select price from public.services where id='plumbing'")).rows[0].price,350);
@@ -42,6 +46,7 @@ test('single-file setup also works after the individual database scripts were ap
   await db.exec("update public.services set price=850 where id='cleaning'");
   await run(db,await readFile(new URL('../supabase/setup.sql',import.meta.url),'utf8'));
   assert.equal((await db.query("select price from public.services where id='cleaning'")).rows[0].price,850);
-  assert.equal((await db.query('select count(*) n from private.admin_emails')).rows[0].n,0);
+  assert.equal((await db.query('select count(*) n from private.admin_emails')).rows[0].n,1);
+  assert.equal((await db.query('select email from private.admin_emails')).rows[0].email,admin);
  }finally{await db.close()}
 });

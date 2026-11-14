@@ -1,14 +1,15 @@
 -- LOCAL MATE: COMPLETE SUPABASE SQL EDITOR SETUP
 -- Generated from the checked-in migrations and starter catalogue.
 -- Run this entire file in Supabase Dashboard > SQL Editor as the project owner.
--- Replace YOUR_ADMIN_EMAIL below with your confirmed administrator email first.
+-- The designated administrator is included by the bootstrap migration.
+-- Optionally set an additional administrator email below; otherwise leave it blank.
 -- Can be rerun for this schema; preserves existing accounts, bookings and service edits.
 -- This configures the database only. Add environment variables and Auth callback URLs separately.
 -- Use SQL Editor setup OR Supabase CLI migrations. See README before mixing the two workflows.
 
 begin;
 select pg_advisory_xact_lock(hashtext('local_mate_database_setup'));
-set local app.local_mate_admin_email = 'YOUR_ADMIN_EMAIL';
+set local app.local_mate_admin_email = '';
 
 -- Migration: 20261114000100_marketplace.sql
 -- Local Mate: PostgreSQL schema, transactional workflows, and row-level security.
@@ -485,6 +486,13 @@ revoke execute on function public.reserve_payment(uuid),public.attach_payment_or
 grant execute on function public.reserve_payment(uuid) to authenticated;
 grant execute on function public.attach_payment_order(uuid,text),public.record_payment_capture(text,text,bigint) to service_role;
 
+-- Migration: 20261114000300_bootstrap_administrator.sql
+-- Owner-designated administrator. Supabase Auth must confirm this email before access is granted.
+-- This creates an allowlist entry only; it never creates an account or bypasses sign-in.
+insert into private.admin_emails(email)
+values ('mueenptb@gmail.com')
+on conflict(email) do nothing;
+
 
 -- Initial supported towns and editable services. Existing catalogue edits are preserved.
 -- Initial catalogue. Admin membership is provisioned separately by the project owner.
@@ -521,7 +529,7 @@ declare admin_email text := lower(trim(current_setting('app.local_mate_admin_ema
 begin
  if admin_email is not null and admin_email not in ('','your_admin_email') then
   if admin_email !~ '^[^[:space:]@]+@[^[:space:]@]+[.][^[:space:]@]+$' then
-   raise exception 'Replace YOUR_ADMIN_EMAIL with a valid administrator email address.';
+   raise exception 'Enter a valid administrator email address.';
   end if;
   insert into private.admin_emails(email) values(admin_email) on conflict do nothing;
  end if;
