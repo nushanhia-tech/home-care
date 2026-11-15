@@ -2,6 +2,12 @@
 import React, { useState, useEffect, useRef } from "react";
 import dynamic from "next/dynamic";
 import {
+  readArray,
+  readStringArray,
+  providerOffers,
+  providerSchedule,
+} from "../lib/provider-data.mjs";
+import {
   Phone,
   MapPin,
   Navigation,
@@ -14,16 +20,7 @@ const PlaceMap = dynamic(() => import("./place-map"), {
   ssr: false,
   loading: () => <p>Loading map…</p>,
 });
-export const array = (value) =>
-  Array.isArray(value)
-    ? value
-    : (() => {
-        try {
-          return JSON.parse(value || "[]");
-        } catch {
-          return [];
-        }
-      })();
+export const array = readArray;
 const money = (n) => "₹" + Number(n || 0).toLocaleString("en-IN");
 function Field({ label, children }) {
   return (
@@ -208,15 +205,15 @@ export function ProviderEditor({
 }) {
   const p = provider || me?.provider || {};
   const [offers, setOffers] = useState(() =>
-    array(p.offerings).length
-      ? array(p.offerings)
-      : array(p.service_ids).map((service_id) => ({
+    providerOffers(p.offerings).length
+      ? providerOffers(p.offerings)
+      : readStringArray(p.service_ids).map((service_id) => ({
           service_id,
           price: null,
           pricing_unit: "quote",
         })),
   );
-  const [areas, setAreas] = useState(() => array(p.locations));
+  const [areas, setAreas] = useState(() => readStringArray(p.locations));
   const [users, setUsers] = useState([]),
     [existing, setExisting] = useState("");
   useEffect(() => {
@@ -1138,5 +1135,100 @@ export function AreaProviders({ location, api, refresh, reload, notify }) {
         </SaveForm>
       )}
     </details>
+  );
+}
+
+export function ProviderAvailability({ provider, api, reload, notify }) {
+  const [draft, setDraft] = useState(() => ({
+    ...providerSchedule(provider.schedule),
+    online: !!provider.online,
+  }));
+  const dirty = useRef(false);
+  const editRevision = useRef(0);
+  useEffect(() => {
+    if (!dirty.current)
+      setDraft({
+        ...providerSchedule(provider.schedule),
+        online: !!provider.online,
+      });
+  }, [provider.schedule, provider.online]);
+  const change = (field, value) => {
+    dirty.current = true;
+    editRevision.current += 1;
+    setDraft((previous) => ({ ...previous, [field]: value }));
+  };
+  return (
+    <>
+      <h2>Make room for what works for you.</h2>
+      <SaveForm
+        onSubmit={async () => {
+          const submittedRevision = editRevision.current;
+          const capacity = Number(draft.max_daily);
+          if (!Number.isInteger(capacity) || capacity < 1 || capacity > 30)
+            throw new Error("Maximum daily bookings must be between 1 and 30.");
+          await api("/provider/availability", {
+            online: draft.online,
+            schedule: {
+              days: draft.days,
+              hours: draft.hours,
+              max_daily: capacity,
+              leave: draft.leave,
+            },
+          });
+          if (editRevision.current === submittedRevision) dirty.current = false;
+          reload();
+          notify("Your availability has been updated.");
+        }}
+      >
+        <label className="checkbox-row">
+          <input
+            type="checkbox"
+            name="online"
+            checked={draft.online}
+            onChange={(e) => change("online", e.target.checked)}
+          />
+          Online and accepting requests
+        </label>
+        <div className="form-grid">
+          <Field label="Working days">
+            <input
+              name="days"
+              value={draft.days}
+              onChange={(e) => change("days", e.target.value)}
+            />
+          </Field>
+          <Field label="Working hours">
+            <input
+              name="hours"
+              value={draft.hours}
+              onChange={(e) => change("hours", e.target.value)}
+            />
+          </Field>
+          <Field label="Maximum daily bookings">
+            <input
+              name="max_daily"
+              type="number"
+              min="1"
+              max="30"
+              required
+              value={draft.max_daily}
+              onChange={(e) => change("max_daily", e.target.value)}
+            />
+          </Field>
+          <Field label="Holiday / leave dates">
+            <input
+              name="leave"
+              placeholder="e.g. 20–22 November"
+              value={draft.leave}
+              onChange={(e) => change("leave", e.target.value)}
+            />
+          </Field>
+        </div>
+        <p className="muted-copy">
+          Turn offline to pause incoming requests. Schedule details are shared
+          with coordinators.
+        </p>
+      </SaveForm>
+    </>
   );
 }

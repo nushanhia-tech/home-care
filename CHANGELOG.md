@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.1 — 2026-11-15
+
+- Fix provider Availability/Profile crashes when saved settings are null, malformed, native JSONB or legacy JSON text.
+- Normalize provider collections and settings at the API and form boundaries, keeping valid existing values.
+- Preserve availability drafts during refreshes/slow saves and show newly saved provider rates after account refresh.
+- Add provider settings regression coverage for repeated desktop/mobile tab navigation, data formats and failed-save retry. No database migration is required for this patch.
+
 ## 0.4.0 — 2026-11-15
 
 - Add administrator provider creation/editing, temporary username credentials, service-specific prices, coverage controls and consented public contact numbers.

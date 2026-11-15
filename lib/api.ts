@@ -3,6 +3,7 @@ import { createHmac,timingSafeEqual } from 'node:crypto';
 import { createClient,isSupabaseConfigured } from './supabase/server';
 import { createPaymentAdmin,administrationConfigured,accountManagementHealth } from './supabase/admin';
 import {ApiError} from './errors';
+import {readRecord,readStringArray,providerOffers} from './provider-data.mjs';
 import {saveManagedProvider,placeCoordinates} from './provider-admin';
 import {passwordPublicRoute,updateCredentials,setManagedCredentials,deleteAllData,verifyCurrentPassword} from './password-auth';
 import {sameOrigin} from './request-security.mjs';
@@ -10,7 +11,7 @@ import { services as starterServices,locations as starterLocations } from '../sr
 const json=(data:unknown,status=200)=>NextResponse.json(data,{status,headers:{'Cache-Control':'no-store'}});
 function required(value:unknown,max=2000){if(typeof value!=='string'||!value.trim()||value.length>max)throw new ApiError('Please check the required fields.');return value.trim()}
 async function checked(request:PromiseLike<any>){const {data,error}=await request;if(error)throw error;return data;}
-const providerDTO=(p:any)=>p?{...p,service_ids:JSON.stringify(p.service_ids),locations:JSON.stringify(p.locations),schedule:JSON.stringify(p.schedule||{})}:null;
+const providerDTO=(p:any)=>p?{...p,service_ids:JSON.stringify(readStringArray(p.service_ids)),locations:JSON.stringify(readStringArray(p.locations)),schedule:JSON.stringify(readRecord(p.schedule)),offerings:providerOffers(p.offerings)}:null;
 const paymentConfigured=()=>!!(process.env.RAZORPAY_KEY_ID&&process.env.RAZORPAY_KEY_SECRET&&process.env.RAZORPAY_WEBHOOK_SECRET&&administrationConfigured());
 export async function handleAPI(req:NextRequest){try{return await route(req);}catch(error:any){if(error instanceof ApiError)return json({error:error.message,...error.details},error.status);if(error.code==='42501')return json({error:'You do not have access to this action.'},403);if(error.code==='23505')return json({error:'This request has already been completed. Please refresh.'},409);if(error.code==='P0001')return json({error:error.message},400);if(error.code?.startsWith('22')||error.code==='23514'||error.code==='23503')return json({error:'Please check the values and try again.'},400);if(error.code==='42P01'||error.code==='42703'||error.code==='PGRST205'||error.code==='PGRST202'||error.code==='PGRST204')return json({error:'The database needs the latest setup. Run the complete supabase/setup.sql from GitHub in Supabase SQL Editor, then refresh.'},503);console.error('Local Mate API error:',error.code||error.name);return json({error:'We could not complete this request. Please try again.'},500)}}
 async function route(req:NextRequest){
