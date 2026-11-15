@@ -10,7 +10,7 @@ const json=(data:unknown,status=200)=>NextResponse.json(data,{status,headers:{'C
 function required(value:unknown,max=2000){if(typeof value!=='string'||!value.trim()||value.length>max)throw new ApiError('Please check the required fields.');return value.trim()}
 async function checked(request:PromiseLike<any>){const {data,error}=await request;if(error)throw error;return data;}
 const providerDTO=(p:any)=>p?{...p,service_ids:JSON.stringify(p.service_ids),locations:JSON.stringify(p.locations),schedule:JSON.stringify(p.schedule||{})}:null;
-const paymentConfigured=()=>!!(process.env.RAZORPAY_KEY_ID&&process.env.RAZORPAY_KEY_SECRET&&process.env.RAZORPAY_WEBHOOK_SECRET&&process.env.SUPABASE_SERVICE_ROLE_KEY);
+const paymentConfigured=()=>!!(process.env.RAZORPAY_KEY_ID&&process.env.RAZORPAY_KEY_SECRET&&process.env.RAZORPAY_WEBHOOK_SECRET&&administrationConfigured());
 export async function handleAPI(req:NextRequest){try{return await route(req);}catch(error:any){if(error instanceof ApiError)return json({error:error.message,...error.details},error.status);if(error.code==='42501')return json({error:'You do not have access to this action.'},403);if(error.code==='23505')return json({error:'This request has already been completed. Please refresh.'},409);if(error.code==='P0001')return json({error:error.message},400);if(error.code?.startsWith('22')||error.code==='23514'||error.code==='23503')return json({error:'Please check the values and try again.'},400);if(error.code==='42P01'||error.code==='PGRST205'||error.code==='PGRST202')return json({error:'The Supabase schema is not ready. Apply the database migrations first.'},503);console.error('Local Mate API error:',error.code||error.name);return json({error:'We could not complete this request. Please try again.'},500)}}
 async function route(req:NextRequest){
  const p=req.nextUrl.pathname.slice(4),method=req.method;
@@ -18,7 +18,7 @@ async function route(req:NextRequest){
   const origin=req.headers.get('origin');if(!sameOrigin(origin,req.url,req.headers.get('host')))throw new ApiError('This request is not permitted.',403);
   if(!(req.headers.get('content-type')||'').includes('application/json'))throw new ApiError('JSON is required.',415);
  }
- if(p==='/status'){const account=await accountManagementHealth();return json({database:isSupabaseConfigured(),uploads:false,payments:paymentConfigured(),authentication:'username_password',accountManagement:account.ready,accountManagementConfigured:account.configured,accountManagementIssue:account.issue,realtime:isSupabaseConfigured()});}
+ if(p==='/status'){const account=await accountManagementHealth();return json({database:isSupabaseConfigured(),uploads:false,payments:paymentConfigured(),authentication:'username_password',accountManagement:account.ready,accountManagementConfigured:account.configured,accountManagementIssue:account.issue,accountManagementKeySource:account.source,accountManagementKeyKind:account.kind,realtime:isSupabaseConfigured()});}
  if(!isSupabaseConfigured()){
   if(p==='/catalog')return json({services:starterServices.map(s=>({...s,available:false})),locations:starterLocations,configured:false});
   if(p==='/providers')return json([]);
@@ -114,7 +114,7 @@ async function route(req:NextRequest){
   if(reservation.gateway_order_id)return json({order_id:reservation.gateway_order_id,key_id:process.env.RAZORPAY_KEY_ID,amount:reservation.amount*100});
   const gateway=await fetch('https://api.razorpay.com/v1/orders',{method:'POST',headers:{Authorization:'Basic '+Buffer.from(process.env.RAZORPAY_KEY_ID+':'+process.env.RAZORPAY_KEY_SECRET).toString('base64'),'Content-Type':'application/json'},body:JSON.stringify({amount:reservation.amount*100,currency:'INR',receipt:reservation.id}),signal:AbortSignal.timeout(15000)});
   if(!gateway.ok)throw new ApiError('The payment gateway could not create an order.',502);const order=await gateway.json();
-  const adminClient=createPaymentAdmin();const saved=await checked(adminClient.rpc('attach_payment_order',{p_payment:reservation.id,p_order:order.id}));
+  const adminClient=await createPaymentAdmin();const saved=await checked(adminClient.rpc('attach_payment_order',{p_payment:reservation.id,p_order:order.id}));
   return json({order_id:saved,key_id:process.env.RAZORPAY_KEY_ID,amount:reservation.amount*100});
  }
  if(p.startsWith('/admin/')){
@@ -158,6 +158,6 @@ async function paymentWebhook(req:NextRequest){
  if(!/^[a-f0-9]{64}$/i.test(signature)||!timingSafeEqual(expected,Buffer.from(signature,'hex')))throw new ApiError('Invalid webhook signature.',403);
  const event=JSON.parse(raw);if(event.event!=='payment.captured')return json({received:true});
  const payment=event.payload?.payment?.entity;if(payment?.currency!=='INR')throw new ApiError('Payment currency does not match.');
- const client=createPaymentAdmin();await checked(client.rpc('record_payment_capture',{p_order:payment.order_id,p_gateway_payment:payment.id,p_amount_paise:payment.amount}));
+ const client=await createPaymentAdmin();await checked(client.rpc('record_payment_capture',{p_order:payment.order_id,p_gateway_payment:payment.id,p_amount_paise:payment.amount}));
  return json({received:true});
 }

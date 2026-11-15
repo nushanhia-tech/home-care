@@ -6,9 +6,9 @@ import {ApiError} from './errors';
 import {accountConfigurationIssue} from './account-config.mjs';
 import {normalizeUsername,validUsername,validPassword,reservedUsernames} from './username.mjs';
 async function rpc(client:SupabaseClient,name:string,args:Record<string,unknown>={}){const {data,error,status}=await client.rpc(name,args);if(error){if(error.code==='P0001'||error.code==='23505'||error.code?.startsWith('22'))throw error;const issue=accountConfigurationIssue(error,status);console.error('Account operation failed',{operation:name,code:error.code||'UPSTREAM_ERROR',status});throw new ApiError(issue.message,503,{code:issue.code,operation:name,providerCode:error.code||null});}return data;}
-export function authAdmin(){if(!administrationConfigured())throw new ApiError('Username sign-in needs server setup. Add SUPABASE_SERVICE_ROLE_KEY in Vercel and redeploy.',503);return createServiceAdmin();}
+export async function authAdmin(){if(!administrationConfigured())throw new ApiError('Username sign-in needs server setup. Add SUPABASE_SERVICE_ROLE_KEY in Vercel and redeploy.',503);return await createServiceAdmin();}
 async function attempt(req:NextRequest,kind:string){
- const client=authAdmin();const ip=req.headers.get('x-vercel-forwarded-for')||req.headers.get('x-forwarded-for')?.split(',')[0]||req.headers.get('x-real-ip')||'local';
+ const client=await authAdmin();const ip=req.headers.get('x-vercel-forwarded-for')||req.headers.get('x-forwarded-for')?.split(',')[0]||req.headers.get('x-real-ip')||'local';
  await rpc(client,'service_auth_attempt',{p_key:createHash('sha256').update(ip.trim()).digest('hex'),p_action:kind});return client;
 }
 export async function passwordPublicRoute(req:NextRequest,path:string,body:any,supabase:SupabaseClient){
@@ -57,7 +57,7 @@ export async function updateCredentials(req:NextRequest,user:any,state:any,body:
  const username=normalizeUsername(body.username||state?.username);
  if(!validUsername(username))throw new ApiError('Enter a valid username.');
  if(username!==state?.username&&reservedUsernames.has(username))throw new ApiError('Choose a different username.');
- const admin=authAdmin();const existing=await rpc(admin,'service_resolve_username',{p_username:username});
+ const admin=await authAdmin();const existing=await rpc(admin,'service_resolve_username',{p_username:username});
  if(existing&&existing.user_id!==user.id)throw new ApiError('Choose a different username.',409);
  const password=body.new_password;
  if(state?.must_change_password&&!password)throw new ApiError('Set a new password before continuing.');
@@ -69,7 +69,7 @@ export async function setManagedCredentials(actorId:string,body:any){
  const username=normalizeUsername(body.username);if(!validUsername(username)||!validPassword(body.password,12))throw new ApiError('Choose a valid username and a temporary password of at least 12 characters.');
  if(body.user_id===actorId)throw new ApiError('Use your own account settings to change your credentials.');
  if(reservedUsernames.has(username))throw new ApiError('Choose a different username.');
- const admin=authAdmin();const existing=await rpc(admin,'service_resolve_username',{p_username:username});
+ const admin=await authAdmin();const existing=await rpc(admin,'service_resolve_username',{p_username:username});
  if(existing&&existing.user_id!==body.user_id)throw new ApiError('This username is already in use.',409);
  const {error}=await admin.auth.admin.updateUserById(body.user_id,{password:body.password,email_confirm:true});if(error)throw new ApiError('Credentials could not be updated.',503);
  await rpc(admin,'service_set_login',{p_user:body.user_id,p_username:username,p_change_password:true});return {ok:true};
@@ -77,7 +77,7 @@ export async function setManagedCredentials(actorId:string,body:any){
 export async function deleteAllData(req:NextRequest,user:any,supabase:SupabaseClient,body:any){
  if(body.confirmation!=='DELETE ALL DATA')throw new ApiError('Type DELETE ALL DATA to confirm.');
  await verifyCurrentPassword(req,user.email,body.current_password);
- const admin=authAdmin();const targets:string[]=[];
+ const admin=await authAdmin();const targets:string[]=[];
  for(let page=1;;page++){const {data,error}=await admin.auth.admin.listUsers({page,perPage:1000});if(error)throw new ApiError('User accounts could not be listed. Nothing has been deleted.',503);targets.push(...data.users.filter(u=>u.id!==user.id).map(u=>u.id));if(data.users.length<1000)break;}
  await rpc(admin,'service_reset_marketplace',{p_actor:user.id,p_confirmation:body.confirmation});
  targets.length=0;

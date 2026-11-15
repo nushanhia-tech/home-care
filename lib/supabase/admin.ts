@@ -1,16 +1,17 @@
 import 'server-only';
-import {accountConfigurationIssue} from '../account-config.mjs';
-import {createClient} from '@supabase/supabase-js';
-export function administrationConfigured(){return !!(process.env.NEXT_PUBLIC_SUPABASE_URL&&process.env.SUPABASE_SERVICE_ROLE_KEY);}
-export function createServiceAdmin(){
- const url=process.env.NEXT_PUBLIC_SUPABASE_URL,key=process.env.SUPABASE_SERVICE_ROLE_KEY;
- if(!url||!key)throw new Error('Add SUPABASE_SERVICE_ROLE_KEY to the server environment.');
- return createClient(url,key,{auth:{persistSession:false,autoRefreshToken:false}});
+import {createClient,type SupabaseClient} from '@supabase/supabase-js';
+import {adminConfiguration,resolveAdminClient} from '../server-credentials.mjs';
+import {ApiError} from '../errors';
+export function administrationConfigured(){return adminConfiguration(process.env).configured;}
+export async function createServiceAdmin():Promise<SupabaseClient>{
+ const result=await resolveAdminClient(adminConfiguration(process.env),createClient);
+ if(!result.client){const issue=result.issue||{code:'SERVER_KEY_MISSING',message:'Add a Supabase server secret key in Vercel and redeploy.'};throw new ApiError(issue.message,503,{code:issue.code});}
+ return result.client;
 }
 export const createPaymentAdmin=createServiceAdmin;
-
 export async function accountManagementHealth(){
- if(!administrationConfigured())return {configured:false,ready:false,issue:{code:'SERVER_KEY_MISSING',message:'Add SUPABASE_SERVICE_ROLE_KEY in Vercel and redeploy.'}};
- try{const {error,status}=await createServiceAdmin().rpc('service_bootstrap_state');return {configured:true,ready:!error,issue:error?accountConfigurationIssue(error,status):null};}
- catch{return {configured:true,ready:false,issue:{code:'INVALID_SERVER_CONFIGURATION',message:'Check the Supabase project URL and server key in Vercel, then redeploy.'}};}
+ const config=adminConfiguration(process.env);
+ if(!config.configured)return {configured:false,ready:false,issue:config.issues[0]};
+ const result=await resolveAdminClient(config,createClient);
+ return {configured:true,ready:!!result.client,issue:result.issue,source:result.source,kind:result.kind};
 }

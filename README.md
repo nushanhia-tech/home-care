@@ -12,10 +12,10 @@ A local-services marketplace built with Next.js, Supabase and Vercel. The reposi
 | `NEXT_PUBLIC_SUPABASE_URL` | Supabase Project URL, without `/rest/v1/` |
 | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Browser-safe project publishable key |
 | `NEXT_PUBLIC_SITE_URL` | Production website origin |
-| `SUPABASE_SERVICE_ROLE_KEY` | **Server-only** Supabase service-role/secret key for account management |
+| `SUPABASE_SECRET_KEY` | **Server-only** Supabase secret key for account management; `SUPABASE_SERVICE_ROLE_KEY` is also accepted |
 | `ADMIN_INITIAL_PASSWORD` | Optional initial administrator password; defaults to the requested `admin123` |
 
-Never prefix the service-role key with `NEXT_PUBLIC_`, include it in source, or put it in a publicly downloadable file. `.env.example` and `downloads/final.env` contain placeholders only for server secrets. Fill the real server key directly in Vercel. Redeploy after changing environment variables.
+Never prefix the service-role key with `NEXT_PUBLIC_`, include it in source, or put it in a publicly downloadable file. `.env.example` and `downloads/final.env` contain placeholders only for server secrets. Fill the real server key directly in Vercel. Modern secret keys use the `apikey` header; legacy service-role JWTs retain Bearer authentication. The server normalizes copied quotes/assignments and verifies configured candidates against the account-setup RPC before using them. Redeploy after changing environment variables.
 
 3. Open `/admin` on the deployed website. Sign in with username **admin** and the configured initial password (**admin123** by default). The server provisions this account once using Supabase Auth's supported Admin API. It never resets an existing administrator to the default password.
 4. At the first login, change the temporary password to a different password of at least 12 characters before administrator controls unlock. You can change the username at the same time or later in Settings.
