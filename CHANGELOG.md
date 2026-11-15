@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.2 — 2026-11-15
+
+- Fix administrator tab request races: Providers only renders results belonging to its current account, tab and refresh, and ignores delayed responses from other screens.
+- Keep provider list failures inside the dashboard with a retry action and safely handle incomplete provider metadata.
+- Fetch overview statistics independently from tab lists so unrelated failures cannot replace provider results.
+- Add administrator regression checks for delayed requests in both orders, correct provider approval targets, invalid directory responses, retry and desktop/mobile navigation.
+
 ## 0.4.1 — 2026-11-15
 
 - Fix provider Availability/Profile crashes when saved settings are null, malformed, native JSONB or legacy JSON text.

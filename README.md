@@ -111,6 +111,8 @@ The SQL suite runs the actual migrations and row-level security in isolated embe
 
 `tests/ui-smoke.py` checks the unconfigured-backend experience, search, responsive layouts and login dialogs. `tests/admin-ui.py` uses mocked API responses to check username login, first-login password changes, website controls, backup download and explicit reset confirmation. `tests/marketplace-ui.py` covers adding a provider, service/area counts, provider selection, prices, map pins, customer contact/tracking, provider messaging and GPS start/stop with local mocked APIs and simulated device coordinates. These tests never send emails or modify hosted data. `tests/provider-settings-ui.py` checks availability/profile navigation with native, legacy, missing and malformed JSON values, preserves edits across saved-profile refreshes and slow requests, and verifies failed saves remain recoverable.
 
+`tests/admin-providers-ui.py` verifies that delayed tab responses cannot replace the Providers list or target approval actions at another kind of record. It also checks malformed provider metadata, inline load failures, retry and mobile navigation.
+
 Live password authentication and account creation still require the configured server key and must be verified against the connected Supabase project.
 
 ## Optional payments
