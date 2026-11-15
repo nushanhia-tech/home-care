@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.4.0 — 2026-11-15
+
+- Add administrator provider creation/editing, temporary username credentials, service-specific prices, coverage controls and consented public contact numbers.
+- Add public service provider counts, rates and provider selection; keep sourced assessments separate from completed-booking reviews.
+- Replace ambiguous provider/profile relationship queries with explicit directory joins and improve missing-schema diagnostics.
+- Add provider profile/rate management and customer/provider messages inboxes, keeping existing quotations, booking progress, support and account controls.
+- Add saved service/pickup/destination map pins and directions links, with explicit GPS permission controls.
+- Add private foreground provider GPS with assigned-job authorization, freshness limits, session invalidation on Stop and cleanup on terminal/reassignment events.
+- Add additive database migration and regenerate complete setup SQL. Backups include provider prices and exclude live GPS/session tokens.
+- Verify SQL authorization/workflows, production build and local desktop/mobile browser flows with mocked APIs; no live test accounts or location records are created.
+
+
 ## 0.3.0 — 2026-11-14
 
 - Replace email links with username/password accounts backed by Supabase Auth.

@@ -3,6 +3,7 @@ import { createHmac,timingSafeEqual } from 'node:crypto';
 import { createClient,isSupabaseConfigured } from './supabase/server';
 import { createPaymentAdmin,administrationConfigured,accountManagementHealth } from './supabase/admin';
 import {ApiError} from './errors';
+import {saveManagedProvider,placeCoordinates} from './provider-admin';
 import {passwordPublicRoute,updateCredentials,setManagedCredentials,deleteAllData,verifyCurrentPassword} from './password-auth';
 import {sameOrigin} from './request-security.mjs';
 import { services as starterServices,locations as starterLocations } from '../src/catalog';
@@ -11,7 +12,7 @@ function required(value:unknown,max=2000){if(typeof value!=='string'||!value.tri
 async function checked(request:PromiseLike<any>){const {data,error}=await request;if(error)throw error;return data;}
 const providerDTO=(p:any)=>p?{...p,service_ids:JSON.stringify(p.service_ids),locations:JSON.stringify(p.locations),schedule:JSON.stringify(p.schedule||{})}:null;
 const paymentConfigured=()=>!!(process.env.RAZORPAY_KEY_ID&&process.env.RAZORPAY_KEY_SECRET&&process.env.RAZORPAY_WEBHOOK_SECRET&&administrationConfigured());
-export async function handleAPI(req:NextRequest){try{return await route(req);}catch(error:any){if(error instanceof ApiError)return json({error:error.message,...error.details},error.status);if(error.code==='42501')return json({error:'You do not have access to this action.'},403);if(error.code==='23505')return json({error:'This request has already been completed. Please refresh.'},409);if(error.code==='P0001')return json({error:error.message},400);if(error.code?.startsWith('22')||error.code==='23514'||error.code==='23503')return json({error:'Please check the values and try again.'},400);if(error.code==='42P01'||error.code==='PGRST205'||error.code==='PGRST202')return json({error:'The Supabase schema is not ready. Apply the database migrations first.'},503);console.error('Local Mate API error:',error.code||error.name);return json({error:'We could not complete this request. Please try again.'},500)}}
+export async function handleAPI(req:NextRequest){try{return await route(req);}catch(error:any){if(error instanceof ApiError)return json({error:error.message,...error.details},error.status);if(error.code==='42501')return json({error:'You do not have access to this action.'},403);if(error.code==='23505')return json({error:'This request has already been completed. Please refresh.'},409);if(error.code==='P0001')return json({error:error.message},400);if(error.code?.startsWith('22')||error.code==='23514'||error.code==='23503')return json({error:'Please check the values and try again.'},400);if(error.code==='42P01'||error.code==='42703'||error.code==='PGRST205'||error.code==='PGRST202'||error.code==='PGRST204')return json({error:'The database needs the latest setup. Run the complete supabase/setup.sql from GitHub in Supabase SQL Editor, then refresh.'},503);console.error('Local Mate API error:',error.code||error.name);return json({error:'We could not complete this request. Please try again.'},500)}}
 async function route(req:NextRequest){
  const p=req.nextUrl.pathname.slice(4),method=req.method;
  if(method!=='GET'&&p!=='/payments/webhook'){
@@ -37,12 +38,12 @@ async function route(req:NextRequest){
   const [data,areas]=await Promise.all([checked(supabase.from('services').select('*').eq('active',true).order('category').order('name')),checked(supabase.from('locations').select('name').eq('active',true).order('name'))]);
   return json({services:data.length?data:starterServices.map(s=>({...s,available:false})),locations:areas.map((l:any)=>l.name),configured:data.length>0});
  }
- if(p==='/providers')return json((await checked(supabase.from('public_providers').select('*'))).map(providerDTO));
+ if(p==='/providers'){const result=await supabase.rpc('provider_directory');if(result.error?.code==='PGRST202')return json((await checked(supabase.from('public_providers').select('*'))).map(providerDTO));if(result.error)throw result.error;return json((result.data||[]).map(providerDTO));}
  const {data:{user},error:authError}=await supabase.auth.getUser();
  if(authError||!user)throw new ApiError('Please sign in to continue.',401);
  if(p==='/auth/signout'&&method==='POST'){const {error}=await supabase.auth.signOut();if(error)throw error;return json({ok:true})}
  const [profile,provider,admin,login]=await Promise.all([checked(supabase.from('users').select('*').eq('id',user.id).single()),checked(supabase.from('provider_profiles').select('*').eq('user_id',user.id).maybeSingle()),checked(supabase.rpc('is_admin')),checked(supabase.rpc('login_state'))]);
- if(p==='/me')return json({...profile,email:user.email,username:login?.username||profile.username,must_change_password:!!login?.must_change_password,provider:providerDTO(provider),admin:!!admin});
+ if(p==='/me'){let offerings:any[]=[];if(provider){const result=await supabase.from('provider_offerings').select('service_id,price,pricing_unit').eq('provider_id',user.id);if(result.error&&!['42P01','PGRST205'].includes(result.error.code))throw result.error;offerings=result.data||[];}return json({...profile,email:user.email,username:login?.username||profile.username,must_change_password:!!login?.must_change_password,provider:provider?providerDTO({...provider,offerings}):null,admin:!!admin});}
  if(profile.is_active===false)throw new ApiError('This account has been suspended. Contact support.',403);
  if(p==='/auth/account'&&method==='POST')return json(await updateCredentials(req,user,login,body));
  if(login?.must_change_password)throw new ApiError('Change your temporary password before continuing.',403);
@@ -60,34 +61,37 @@ async function route(req:NextRequest){
  if(p==='/addresses'){
   if(method==='GET')return json(await checked(supabase.from('addresses').select('*').eq('user_id',user.id).order('created_at')));
   if(method==='POST'){
-   const data={label:required(body.label,100),address:required(body.address,1000),location:required(body.location,100)};
+   const data={label:required(body.label,100),address:required(body.address,1000),location:required(body.location,100),...placeCoordinates(body)};
    const area=await checked(supabase.from('locations').select('name').eq('name',data.location).eq('active',true).maybeSingle());if(!area)throw new ApiError('Choose a supported town.');
    if(body.id){const rows=await checked(supabase.from('addresses').update(data).eq('id',body.id).eq('user_id',user.id).select('id').single());return json(rows)}
    return json(await checked(supabase.from('addresses').insert({...data,user_id:user.id}).select('id').single()));
   }
  }
  if(p.startsWith('/addresses/')&&method==='DELETE'){await checked(supabase.from('addresses').delete().eq('id',p.split('/').pop()).eq('user_id',user.id));return json({ok:true})}
+ if(p==='/provider/profile'&&method==='POST'){await checked(supabase.rpc('save_provider',{p_data:body}));return json({ok:true});}
  if(p==='/provider/register'&&method==='POST'){await checked(supabase.rpc('register_provider',{p_data:body}));return json({ok:true,status:'pending'})}
  if(p==='/provider/availability'&&method==='POST'){await checked(supabase.rpc('set_availability',{p_online:body.online===true,p_schedule:body.schedule||{}}));return json({ok:true})}
  if(p==='/bookings'){
   if(method==='GET')return json(await checked(supabase.rpc('list_bookings',{p_role:req.nextUrl.searchParams.get('role')||'customer'})));
-  if(method==='POST')return json({id:await checked(supabase.rpc('create_booking',{p_data:body}))},201);
+  if(method==='POST'){if(body.provider_id||body.latitude!==undefined&&body.latitude!==''||body.destination_latitude!==undefined&&body.destination_latitude!=='')await checked(supabase.from('bookings').select('requested_provider_id').limit(0));return json({id:await checked(supabase.rpc('create_booking',{p_data:body}))},201);}
  }
  const match=p.match(/^\/bookings\/([^/]+)(?:\/(.*))?$/);
  if(match){
   const id=match[1],action=match[2];
+  if(action==='tracking'){if(method==='GET')return json(await checked(supabase.rpc('booking_tracking',{p_booking:id})));if(method==='POST'){await checked(supabase.rpc('share_booking_location',{p_booking:id,p_data:body}));return json({ok:true});}}
+  if(action==='contacts'&&method==='GET')return json(await checked(supabase.rpc('booking_contacts',{p_booking:id})));
   if(action==='messages'){
    if(method==='GET')return json(await checked(supabase.rpc('booking_messages',{p_booking:id})));
    if(method==='POST'){await checked(supabase.rpc('send_message',{p_booking:id,p_body:required(body.body,4000)}));return json({ok:true})}
   }
-  const booking=await checked(supabase.from('bookings').select('*,services(name,type)').eq('id',id).maybeSingle());if(!booking)throw new ApiError('Booking not found or unavailable to your account.',404);
+  const booking=await checked(supabase.from('bookings').select('*').eq('id',id).maybeSingle());if(!booking)throw new ApiError('Booking not found or unavailable to your account.',404);
   if(!action&&method==='GET'){
    const [history,quotes]=await Promise.all([checked(supabase.from('booking_status_history').select('status,note,created_at').eq('booking_id',id).order('id')),checked(supabase.from('quotations').select('*').eq('booking_id',id).order('created_at',{ascending:false}))]);
-   return json({...booking,service_name:booking.services.name,service_type:booking.services.type,history,quotes});
+   const service=await checked(supabase.from('services').select('name,type').eq('id',booking.service_id).single());return json({...booking,service_name:service.name,service_type:service.type,history,quotes});
   }
   if(action==='invoice'&&method==='GET'){
    if(booking.customer_id!==user.id&&booking.provider_id!==user.id&&!admin)throw new ApiError('Not permitted.',403);
-   return json({booking_id:id,service:booking.services.name,amount:booking.estimated_price,status:booking.payment_status,date:booking.created_at,notice:'Service summary. This is not proof of payment.'});
+   return json({booking_id:id,service:booking.service_id,amount:booking.estimated_price,status:booking.payment_status,date:booking.created_at,notice:'Service summary. This is not proof of payment.'});
   }
   if(method==='POST'&&['accept','reject','quote','quote-response','reschedule','status','review'].includes(action))return json(await checked(supabase.rpc('booking_action',{p_booking:id,p_action:action,p_data:body})));
  }
@@ -136,7 +140,10 @@ async function route(req:NextRequest){
    for(const result of [customers,pros,pending,bookings,paid,commission])if(result.error)throw result.error;
    return json({customers:customers.count||0,providers:pros.count||0,pending:pending.count||0,bookings:bookings.count||0,paid:(paid.data||[]).reduce((sum:number,p:any)=>sum+p.amount,0),commission:commission.data?.value??10});
   }
-  if(p==='/admin/providers'&&method==='GET')return json((await checked(supabase.from('provider_profiles').select('*,users(name,email,phone)').order('created_at',{ascending:false}))).map((row:any)=>({...providerDTO(row),...row.users})));
+  if(p==='/admin/providers'&&method==='GET'){const result=await supabase.rpc('admin_provider_directory');if(result.error?.code==='PGRST202'){const [profiles,users]=await Promise.all([checked(supabase.from('provider_profiles').select('*').order('created_at',{ascending:false})),checked(supabase.from('users').select('id,name,username,phone,is_active'))]);return json(profiles.map((p:any)=>providerDTO({...p,...users.find((u:any)=>u.id===p.user_id),offerings:[]})));}if(result.error)throw result.error;return json((result.data||[]).map(providerDTO));}
+  if(p==='/admin/providers'&&method==='POST')return json(await saveManagedProvider(supabase,body));
+  if(p==='/admin/service-provider'&&method==='POST'){await checked(supabase.rpc('admin_service_provider',{p_provider:body.provider_id,p_service:body.service_id,p_enabled:body.enabled===true,p_price:body.price??null,p_unit:body.pricing_unit||'quote'}));return json({ok:true});}
+  if(p==='/admin/provider-area'&&method==='POST'){await checked(supabase.rpc('admin_provider_area',{p_provider:body.provider_id,p_location:body.location,p_enabled:body.enabled===true}));return json({ok:true});}
   if(p==='/admin/provider'&&method==='POST'){await checked(supabase.rpc('admin_provider',{p_user:body.user_id,p_status:body.status}));return json({ok:true})}
   if(p==='/admin/users'&&method==='GET')return json(await checked(supabase.from('users').select('*').order('created_at',{ascending:false})));
   if(p==='/admin/services'){
