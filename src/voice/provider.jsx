@@ -339,17 +339,23 @@ export function CallHistory({ api, bookingId }) {
     [error, setError] = useState("");
   useEffect(() => {
     let alive = true;
-    api("/voice/history" + (bookingId ? "?booking=" + bookingId : ""))
-      .then((v) => {
-        if (alive) setItems(v);
-      })
-      .catch((e) => {
-        if (alive) setError(e.message);
-      });
+    const load = () =>
+      api("/voice/history" + (bookingId ? "?booking=" + bookingId : ""))
+        .then((v) => {
+          if (!alive) return;
+          setItems(v);
+          setError("");
+        })
+        .catch((e) => {
+          if (alive) setError(e.message);
+        });
+    load();
+    const timer = setInterval(load, 5000);
     return () => {
       alive = false;
+      clearInterval(timer);
     };
-  }, [bookingId]);
+  }, [api, bookingId]);
   return (
     <div className="panel">
       <h2>Call history</h2>

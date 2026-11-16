@@ -44,6 +44,23 @@ export function BookingOperations({
       clearInterval(timer);
     };
   }, [b.id, refresh]);
+  useEffect(() => {
+    if (!customer || b.status !== "arrived") {
+      setOTP(null);
+      return;
+    }
+    let active = true;
+    const update = () =>
+      api("/bookings/" + b.id + "/start-otp")
+        .then((value) => active && setOTP(value))
+        .catch(() => {});
+    update();
+    const timer = setInterval(update, 2000);
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, [b.id, b.status, customer]);
   const run = async (path, body) => {
     await api(path, body);
     await load();
@@ -83,43 +100,17 @@ export function BookingOperations({
           {error}
         </p>
       )}
-      {b.status === "arrived" && customer && (
+      {b.status === "arrived" && customer && otp && (
         <div className="otp-card">
-          <h3>Your private work-start OTP</h3>
-          <p>
-            Share this code only with your assigned provider when they have
-            arrived and you are ready for work to start.
-          </p>
-          <button
-            className="button secondary"
-            onClick={async () => {
-              try {
-                let value = await api("/bookings/" + b.id + "/start-otp");
-                if (!value) {
-                  await api("/bookings/" + b.id + "/start-otp", {});
-                  value = await api("/bookings/" + b.id + "/start-otp");
-                }
-                setOTP(value);
-              } catch (e) {
-                setError(e.message);
-              }
-            }}
-          >
-            View work-start OTP
-          </button>
-          {otp &&
-            (otp.locked ? (
-              <p className="form-error">
-                Verification is locked. Contact Local Mate support.
-              </p>
-            ) : (
-              <>
-                <strong className="otp-code">{otp.code}</strong>
-                <small>
-                  Expires {new Date(otp.expires_at).toLocaleTimeString()}
-                </small>
-              </>
-            ))}
+          {otp.locked ? (
+            <p className="form-error">
+              Verification is locked. Contact Local Mate support.
+            </p>
+          ) : (
+            <strong className="otp-code" role="status" aria-live="assertive">
+              {otp.code}
+            </strong>
+          )}
         </div>
       )}
       {b.status === "arrived" && provider && (
@@ -576,10 +567,22 @@ export function InvoiceHistory({ api }) {
   const [items, setItems] = useState([]),
     [error, setError] = useState("");
   useEffect(() => {
-    api("/invoices")
-      .then(setItems)
-      .catch((e) => setError(e.message));
-  }, []);
+    let active = true;
+    const load = () =>
+      api("/invoices")
+        .then((value) => {
+          if (!active) return;
+          setItems(value);
+          setError("");
+        })
+        .catch((e) => active && setError(e.message));
+    load();
+    const timer = setInterval(load, 5000);
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, [api]);
   return (
     <div className="panel">
       <h2>Invoice history</h2>

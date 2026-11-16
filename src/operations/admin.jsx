@@ -425,13 +425,30 @@ function AuditPanel({ api, refresh }) {
   const [data, setData] = useState(null),
     [error, setError] = useState("");
   useEffect(() => {
-    api("/operations/logs")
-      .then(setData)
-      .catch((e) => setError(e.message));
+    let active = true;
+    const load = () =>
+      api("/operations/logs")
+        .then((value) => {
+          if (!active) return;
+          setData(value);
+          setError("");
+        })
+        .catch((e) => active && setError(e.message));
+    load();
+    const timer = setInterval(load, 5000);
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
   }, [refresh]);
   return (
     <div className="panel">
       <h2>Booking acceptance, OTP & financial audit</h2>
+      <p className="muted-copy">
+        This live view shows only activity from the latest 30 minutes. Generic
+        administrator activity logs older than 30 minutes are deleted
+        automatically.
+      </p>
       {error && <p className="form-error">{error}</p>}
       {data &&
         Object.entries(data).map(([kind, items]) => (

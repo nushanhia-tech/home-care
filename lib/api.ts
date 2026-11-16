@@ -556,6 +556,26 @@ async function route(req: NextRequest) {
           .order("created_at", { ascending: false }),
       ),
     );
+  if (p === "/customer/dashboard" && method === "GET") {
+    const results = await Promise.allSettled([
+      supabase.rpc("list_bookings", { p_role: "customer" }),
+      supabase.from("addresses").select("*").eq("user_id", user.id).order("created_at", { ascending: false }),
+      supabase.from("payments").select("*").order("created_at", { ascending: false }),
+    ]);
+    const value = (index: number, required = false) => {
+      const item: any = results[index];
+      if (item.status === "fulfilled" && !item.value.error)
+        return item.value.data || [];
+      if (required)
+        throw item.status === "fulfilled" ? item.value.error : item.reason;
+      return [];
+    };
+    return json({
+      bookings: value(0, true),
+      addresses: value(1),
+      payments: value(2),
+    });
+  }
   if (p === "/payments/order" && method === "POST") {
     if (!paymentConfigured())
       throw new ApiError(
@@ -758,16 +778,21 @@ async function route(req: NextRequest) {
       );
       return json({ ok: true });
     }
-    if (p === "/admin/logs")
+    if (p === "/admin/logs") {
+      const recent = await supabase.rpc("admin_recent_logs");
+      if (!recent.error) return json(recent.data || []);
+      if (recent.error.code !== "PGRST202") throw recent.error;
       return json(
         await checked(
           supabase
             .from("admin_activity_logs")
             .select("*")
+            .gte("created_at", new Date(Date.now() - 30 * 60 * 1000).toISOString())
             .order("id", { ascending: false })
-            .limit(100),
+            .limit(200),
         ),
       );
+    }
   }
   throw new ApiError("This action is not available.", 404);
 }

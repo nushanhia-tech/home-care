@@ -9,14 +9,18 @@ try{
  const results=await Promise.all(['p3','p2'].map(who=>scalar(pool,who,'accept_booking',[id])));assert.equal(results.filter(x=>x.ok).length,1);const winner=results[0].ok?'p3':'p2';
  assert.equal((await pool.query('select * from public.booking_assignments where booking_id=$1',[id])).rowCount,1);check.push('real concurrent PostgreSQL acceptance assigns exactly once');
  const safe=await scalar(pool,winner,'booking_detail',[id]);assert.ok(!JSON.stringify(safe).includes('987654'));assert.ok(!JSON.stringify(await scalar(pool,'customer','booking_contacts',[id])).includes('phone'));check.push('booking and contact responses exclude counterparty phone numbers');
+ await scalar(pool,'customer','send_message',[id,'This completed-job message must be removed automatically']);
+ assert.equal((await pool.query('select count(*)::int n from public.messages where booking_id=$1',[id])).rows[0].n,1);
  await assert.rejects(scalar(pool,winner,'booking_action',[id,'status',{status:'work_started'}]),/OTP/);
  await scalar(pool,winner,'booking_action',[id,'status',{status:'on_the_way'}]);await scalar(pool,winner,'booking_action',[id,'status',{status:'arrived'}]);
  const otp=makeOTP(id,OTP_SECRET);await scalar(pool,'service','service_issue_job_otp',[ids[winner],id,otp.hash,otp.cipher]);
+ const activeOTPs=await call(pool,'service','service_customer_active_otps',[ids.customer]);assert.equal(activeOTPs.length,1);assert.equal(decryptOTP(activeOTPs[0].ciphertext,OTP_SECRET),decryptOTP(otp.cipher,OTP_SECRET));check.push('customer active OTP endpoint exposes the number immediately to its owner only');
  await assert.rejects(scalar(pool,winner,'service_customer_job_otp',[ids.customer,id]),/permission denied|authorization/);
  let value=await scalar(pool,'service','service_verify_job_otp',[ids[winner],id,'wrong']);assert.equal(value.ok,false);
  const code=decryptOTP(otp.cipher,OTP_SECRET);value=await scalar(pool,'service','service_verify_job_otp',[ids[winner],id,otpHash(code,id,OTP_SECRET)]);assert.equal(value.ok,true);check.push('OTP cannot be bypassed, incorrect attempts persist, correct OTP starts work');
  const charge=await scalar(pool,winner,'request_additional_charge',[id,10000,'Approved extra work']);await scalar(pool,'customer','respond_additional_charge',[charge,'approved']);
  const bill=await scalar(pool,winner,'submit_final_bill',[id,{labour_paise:80000,materials_paise:30000,discount_paise:0,additional_paise:999999,description:'Actual completed test-only work'}]);
+ assert.equal((await pool.query('select count(*)::int n from public.messages where booking_id=$1',[id])).rows[0].n,0);await assert.rejects(scalar(pool,'customer','send_message',[id,'This must not be saved after completion']),/closed/);check.push('work completion automatically removes and permanently closes booking messages');
  assert.equal((await pool.query('select total_paise from public.job_bills where id=$1',[bill])).rows[0].total_paise,'120000');
  const invoice=await scalar(pool,'customer','respond_final_bill',[bill,'confirm','']);assert.ok(invoice.invoice_id);await scalar(pool,'customer','respond_final_bill',[bill,'confirm','']);assert.equal((await pool.query('select * from public.invoices where bill_id=$1',[bill])).rowCount,1);check.push('approved extras only, exact INR 1200 total, one actual invoice');
  const dashboard=await scalar(pool,winner,'commission_dashboard');assert.equal(dashboard.statements[0].commission_paise,12000);check.push('confirmed bill accrues commission exactly once');
@@ -58,6 +62,8 @@ try{
  await scalar(pool,'admin','admin_verify_refund',[second,1000000,'TEST-actual-full-refund','Actual cash refund reconciled for this test']);
  assert.equal((await scalar(pool,'customer','booking_detail',[second])).payment_status,'refunded');
  assert.equal((await pool.query('select status from public.provider_commissions where booking_id=$1',[second])).rows[0].status,'held');check.push('verified refunds are bounded by actual payment and hold commission');
+ await pool.query("insert into public.admin_activity_logs(actor_id,action,target_id,created_at) values($1,'TEST-old-log','retention',now()-interval '31 minutes'),($1,'TEST-recent-log','retention',now())",[ids.admin]);
+ const recentLogs=await call(pool,'admin','admin_recent_logs',[]);assert.ok(recentLogs.some(log=>log.action==='TEST-recent-log'));assert.ok(!recentLogs.some(log=>log.action==='TEST-old-log'));assert.equal((await pool.query("select count(*)::int n from public.admin_activity_logs where action='TEST-old-log'")).rows[0].n,0);check.push('admin logs retain only the latest 30 minutes and delete older generic records');
  // Exercise the destructive reset only inside a rolled-back local test transaction.
  const resetClient=await pool.connect();
  try {

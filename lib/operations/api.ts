@@ -58,6 +58,29 @@ export async function operationsAPI(
     return json(await checked(client.rpc("admin_financial_overview")));
   if (path === "/operations/logs")
     return json(await checked(client.rpc("admin_operations_logs")));
+  if (path === "/customer/otps" && method === "GET") {
+    const service = await createServiceAdmin();
+    const result = await service.rpc("service_customer_active_otps", {
+      p_actor: user.id,
+    });
+    if (result.error?.code === "PGRST202") return json([]);
+    if (result.error) throw result.error;
+    return json(
+      (result.data || []).flatMap((record: any) => {
+        try {
+          return [
+            {
+              booking_id: record.booking_id,
+              code: decryptOTP(record.ciphertext, otpSecret()),
+              expires_at: record.expires_at,
+            },
+          ];
+        } catch {
+          return [];
+        }
+      }),
+    );
+  }
   if (path === "/provider/weekly-summary")
     return json(await checked(client.rpc("weekly_summary")));
   if (path === "/provider/history")

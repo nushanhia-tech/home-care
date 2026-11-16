@@ -1074,39 +1074,75 @@ function CustomerPortal(props) {
   const [bookings, setBookings] = useState([]),
     [addresses, setAddresses] = useState([]),
     [payments, setPayments] = useState([]),
+    [activeOTPs, setActiveOTPs] = useState([]),
     [loading, setLoading] = useState(true),
     [error, setError] = useState("");
   useEffect(() => {
     if (!me) return;
+    let alive = true;
     setLoading(true);
-    Promise.all([api("/bookings"), api("/addresses"), api("/payments")])
-      .then(([a, b, c]) => {
-        setBookings(a);
-        setAddresses(b);
-        setPayments(c);
+    setError("");
+    api("/customer/dashboard")
+      .then((data) => {
+        if (!alive) return;
+        setBookings(data.bookings || []);
+        setAddresses(data.addresses || []);
+        setPayments(data.payments || []);
       })
-      .catch((e) => setError(e.message))
-      .finally(() => setLoading(false));
-  }, [me, refresh]);
+      .catch((e) => alive && setError(e.message))
+      .finally(() => alive && setLoading(false));
+    return () => {
+      alive = false;
+    };
+  }, [me?.id, refresh]);
   useEffect(() => {
     if (!me) return;
     let alive = true;
-    const timer = setInterval(
-      () =>
-        api("/bookings")
-          .then((d) => {
-            if (alive) setBookings(d);
-          })
-          .catch((e) => {
-            if (alive) setError(e.message);
-          }),
-      15000,
-    );
+    const update = () =>
+      api("/bookings")
+        .then((data) => {
+          if (!alive) return;
+          setBookings(data);
+          setError("");
+          setLoading(false);
+        })
+        .catch((e) => alive && setError(e.message));
+    const timer = setInterval(update, 3000);
+    const client = getBrowserClient();
+    const channel = client
+      ?.channel("customer-bookings-" + me.id)
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "booking_events" },
+        update,
+      )
+      .subscribe();
+    return () => {
+      alive = false;
+      clearInterval(timer);
+      if (channel) void client.removeChannel(channel).catch(() => {});
+    };
+  }, [me?.id]);
+  const waitingForOTP = bookings.some(
+    (booking) => booking.customer_id === me?.id && booking.status === "arrived",
+  );
+  useEffect(() => {
+    if (!me?.id || !waitingForOTP) {
+      setActiveOTPs([]);
+      return;
+    }
+    let alive = true;
+    const update = () =>
+      api("/customer/otps")
+        .then((items) => alive && setActiveOTPs(items))
+        .catch(() => {});
+    update();
+    const timer = setInterval(update, 2000);
     return () => {
       alive = false;
       clearInterval(timer);
     };
-  }, [me]);
+  }, [me?.id, waitingForOTP]);
   if (!me)
     return (
       <AccountGate heading="Your home for getting things done." open={open}>
@@ -1165,6 +1201,17 @@ function CustomerPortal(props) {
           </button>
         </aside>
         <div className="portal-content">
+          {activeOTPs.map((otp) => (
+            <div
+              className="otp-portal-message"
+              role="alert"
+              aria-live="assertive"
+              aria-label="Work start OTP"
+              key={otp.booking_id}
+            >
+              {otp.code}
+            </div>
+          ))}
           {error && <p className="form-error">{error}</p>}
           {tab === "invoices" ? (
             <InvoiceHistory api={api} />
@@ -1612,7 +1659,7 @@ function AdminPortal(props) {
             ? "/admin/" + endpoint[tab]
             : null;
     if (path) {
-      api(path)
+      const load = () => api(path)
         .then((value) => {
           const items = adminRows(tab, value);
           if (active) setResult({ key: resultKey, items, error: "" });
@@ -1621,6 +1668,12 @@ function AdminPortal(props) {
           if (active)
             setResult({ key: resultKey, items: null, error: e.message });
         });
+      load();
+      const timer = tab === "logs" ? setInterval(load, 5000) : null;
+      return () => {
+        active = false;
+        if (timer) clearInterval(timer);
+      };
     }
     return () => {
       active = false;
@@ -1840,6 +1893,12 @@ function AdminPortal(props) {
                   </Button>
                 )}
               </div>
+              {tab === "logs" && (
+                <p className="muted-copy">
+                  Live activity from the latest 30 minutes only. Older generic
+                  administrator logs are deleted automatically.
+                </p>
+              )}
               {dataError ? (
                 <div className="admin-list-error">
                   <p className="form-error" role="alert">
@@ -3198,10 +3257,25 @@ function BookingDetails({
           if (alive) setError(e.message);
         });
     load();
-    const timer = setInterval(load, 10000);
+    const timer = setInterval(load, 3000);
+    const client = getBrowserClient();
+    const channel = client
+      ?.channel("booking-detail-" + id)
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "booking_events",
+          filter: "booking_id=eq." + id,
+        },
+        load,
+      )
+      .subscribe();
     return () => {
       alive = false;
       clearInterval(timer);
+      if (channel) void client.removeChannel(channel).catch(() => {});
     };
   }, [id, refresh]);
   const action = async (path, data = {}) => {
@@ -3511,11 +3585,14 @@ function Chat({ id, me }) {
     end = React.useRef(null);
   const load = () =>
     api("/bookings/" + id + "/messages")
-      .then(setMessages)
+      .then((items) => {
+        setMessages(items);
+        setError("");
+      })
       .catch((e) => setError(e.message));
   useEffect(() => {
     load();
-    const timer = setInterval(load, 10000);
+    const timer = setInterval(load, 3000);
     const client = getBrowserClient();
     const channel = client
       ?.channel("booking-" + id)
@@ -3542,7 +3619,8 @@ function Chat({ id, me }) {
     <>
       <p className="muted-copy">
         Private conversation for booking {id.slice(0, 8).toUpperCase()}.
-        Realtime updates with a 10-second refresh fallback.
+        Realtime updates with a fast refresh fallback. Messages are removed
+        automatically when the work is completed.
       </p>
       {error && <p className="form-error">{error}</p>}
       <label className="field">

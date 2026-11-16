@@ -872,6 +872,7 @@ export function MessagesInbox({ bookings, me, api, open }) {
         .filter(
           (b) =>
             b.provider_id &&
+            !["work_completed", "cancelled"].includes(b.status) &&
             (b.provider_id === me.id || b.customer_id === me.id),
         )
         .map((b) => (
@@ -891,7 +892,11 @@ export function MessagesInbox({ bookings, me, api, open }) {
             <span>Open chat</span>
           </button>
         ))}
-      {!bookings.some((b) => b.provider_id) && (
+      {!bookings.some(
+        (b) =>
+          b.provider_id &&
+          !["work_completed", "cancelled"].includes(b.status),
+      ) && (
         <p>No assigned booking conversations yet.</p>
       )}
       <h3 className="mt">Recent updates</h3>
