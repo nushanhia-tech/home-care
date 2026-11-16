@@ -124,7 +124,7 @@ test("public rates use real offerings and ratings distinguish assessment from co
   const p = (await rpc(null, "provider_directory")).find(
     (p) => p.user_id === ids.pro,
   );
-  assert.equal(p.phone, null);
+  assert.equal(p.phone, undefined);
   assert.equal(p.rating, null);
   assert.equal(p.review_count, 0);
   assert.equal(p.assessment_rating, 4.2);
@@ -142,13 +142,13 @@ test("public rates use real offerings and ratings distinguish assessment from co
     /permission denied/,
   );
 });
-test("public phone publication requires provider consent and private contact is participant-only", async () => {
+test("phone numbers never publish, even after acceptance or an old consent flag", async () => {
   const id = await rpc("customer", "create_booking", [booking()]);
   await assert.rejects(rpc("pro", "booking_contacts", [id]), /private/);
   await rpc("pro", "booking_action", [id, "accept", {}]);
   assert.equal(
     (await rpc("customer", "booking_contacts", [id])).provider.phone,
-    "+919876543210",
+    undefined,
   );
   await assert.rejects(rpc("second", "booking_contacts", [id]), /private/);
   await rpc("pro", "save_provider", [
@@ -162,7 +162,7 @@ test("public phone publication requires provider consent and private contact is 
   let p = (await rpc(null, "provider_directory")).find(
     (p) => p.user_id === ids.pro,
   );
-  assert.equal(p.phone, "+919876543210");
+  assert.equal(p.phone, undefined);
   assert.equal(
     p.assessment_rating,
     4.2,
@@ -232,52 +232,20 @@ test("provider prices, service membership and area counts are validated and edit
     /Administrator/,
   );
 });
-test("selected provider receives exclusive request and its visit rate becomes the estimate", async () => {
-  const id = await rpc("customer", "create_booking", [booking()]);
-  assert.equal(
-    (
-      await db.query(
-        "select estimated_price,requires_quote,latitude from public.bookings where id=$1",
-        [id],
-      )
-    ).rows[0].estimated_price,
-    725,
-  );
-  assert.equal(
-    (await rpc("second", "list_bookings", ["provider"])).filter(
-      (b) => b.id === id,
-    ).length,
-    0,
-  );
-  await assert.rejects(
-    rpc("second", "booking_action", [id, "accept", {}]),
-    /access/,
-  );
-  await rpc("pro", "booking_action", [id, "reject", {}]);
-  assert.equal(
-    (
-      await db.query(
-        "select requested_provider_id from public.bookings where id=$1",
-        [id],
-      )
-    ).rows[0].requested_provider_id,
-    null,
-  );
-  assert.equal(
-    (await rpc("second", "list_bookings", ["provider"])).filter(
-      (b) => b.id === id,
-    ).length,
-    1,
-  );
+test("all eligible providers receive requests and the accepting provider rate becomes the estimate",async()=>{
+ const id=await rpc('customer','create_booking',[booking()]);
+ assert.ok((await rpc('second','list_bookings',['provider'])).some(b=>b.id===id));
+ assert.ok((await rpc('pro','list_bookings',['provider'])).some(b=>b.id===id));
+ await rpc('pro','booking_action',[id,'accept',{}]);
+ assert.equal((await db.query('select estimated_price from public.bookings where id=$1',[id])).rows[0].estimated_price,725);
+ assert.equal((await rpc('second','booking_action',[id,'accept',{}])).code,'ALREADY_ASSIGNED');
 });
 test("hourly/daily and quote offerings require customer approval before confirmation", async () => {
   const id = await rpc("customer", "create_booking", [
     booking({ service_id: "painting" }),
   ]);
-  await assert.rejects(
-    rpc("pro", "booking_action", [id, "accept", {}]),
-    /quotation/,
-  );
+  await rpc("pro", "booking_action", [id, "accept", {}]);
+  assert.equal((await db.query('select status from public.bookings where id=$1',[id])).rows[0].status,'requested');
   const q = await rpc("pro", "booking_action", [
     id,
     "quote",
@@ -422,22 +390,10 @@ test("application backup includes rates while excluding live GPS and session tok
   assert.equal(backup.tables.booking_gps_sessions, undefined);
 });
 
-test("providers cannot select or accept themselves or create self reviews", async () => {
-  await assert.rejects(
-    rpc("pro", "create_booking", [booking()]),
-    /another provider/,
-  );
-  const id = await rpc("pro", "create_booking", [
-    booking({ provider_id: null }),
-  ]);
-  await assert.rejects(
-    rpc("pro", "booking_action", [id, "accept", {}]),
-    /own booking/,
-  );
-  await assert.rejects(
-    rpc("admin", "admin_assign", [id, ids.pro]),
-    /own booking/,
-  );
+test("providers can request other providers but cannot accept or be assigned themselves",async()=>{
+ const id=await rpc('pro','create_booking',[booking()]);
+ await assert.rejects(rpc('pro','booking_action',[id,'accept',{}]),/access|own booking/);
+ await assert.rejects(rpc('admin','admin_reassign_booking',[id,ids.pro,'Test assignment exception']),/eligible/);
 });
 test("suspension and website pauses revoke GPS sessions and erase the current point", async () => {
   const id = await assigned(),

@@ -1,148 +1,3861 @@
-'use client';
-import React,{useState,useEffect,useCallback} from 'react';
-import {readRecord} from '../lib/provider-data.mjs';
-import {adminRows} from '../lib/admin-data.mjs';
-import {ProviderAvailability,ProviderEditor,ProviderRates,Rating,ServiceProviders,PlacePicker,SavedPlaceForm,BookingContact,BookingTracking,MessagesInbox,ServiceRoster,array} from './marketplace-tools';
-import {getBrowserClient} from '../lib/supabase/browser';
-import {AdminTools,AdminUserActions,CredentialsPanel} from './admin-tools';
-import {House,MapPin,ChevronDown,ArrowRight,Search,ShieldCheck,CalendarDays,Wallet,Check,CheckCircle2,Clock,Menu,X,Plus,UserRound,Bell,BriefcaseBusiness,MessageSquare,LayoutDashboard,LogOut,Settings,Users,ClipboardList,Heart,Headphones,Star,ChevronRight,ArrowUpRight,Leaf,Navigation,SlidersHorizontal,Download,Send,Globe,Mail,AlertCircle,LoaderCircle,Building2} from 'lucide-react';
-import {services as defaults,categories,locations as defaultLocations,workflow} from './catalog.js';
-const rupees=n=>'₹'+Number(n||0).toLocaleString('en-IN');
-const title=s=>(s||'').replaceAll('_',' ').replace(/\b\w/g,c=>c.toUpperCase());
-const date=s=>new Date(s).toLocaleString('en-IN',{dateStyle:'medium',timeStyle:'short',timeZone:'Asia/Kolkata'});
-async function api(path,body,method){const r=await fetch('/api'+path,{method:method||(body?'POST':'GET'),headers:body?{'content-type':'application/json'}:{},body:body?JSON.stringify(body):undefined});const d=await r.json();if(!r.ok)throw Object.assign(new Error(d.error||'Please try again.'),{status:r.status,code:d.code,retryAfterSeconds:Number(d.retryAfterSeconds||r.headers.get('Retry-After'))||undefined});return d}
-function IconBox({icon:Icon,tone='blue',children}){return <span className={'icon-box '+tone}>{Icon?<Icon size={22}/>:children}</span>}
-function Empty({icon:Icon=ClipboardList,title:heading,children,action}){return <div className="empty"><Icon size={36} strokeWidth={1.4}/><h3>{heading}</h3><p>{children}</p>{action}</div>}
-function Button({children,secondary=false,className='',...props}){return <button className={(secondary?'button secondary ':'button ')+className} {...props}>{children}</button>}
-function Field({label,children,hint}){return <label className="field"><span>{label}</span>{React.Children.map(children,child=>React.isValidElement(child)&&['input','select','textarea'].includes(child.type)?React.cloneElement(child,{'aria-label':child.props['aria-label']||label}):child)}{hint&&<small>{hint}</small>}</label>}
-function Form({onSubmit,children,submit='Save changes',disabled=false}){const [busy,setBusy]=useState(false),[error,setError]=useState(''),submitting=React.useRef(false);return <form onSubmit={async e=>{e.preventDefault();if(disabled||submitting.current)return;submitting.current=true;setError('');setBusy(true);try{await onSubmit(Object.fromEntries(new FormData(e.currentTarget)))}catch(e){setError(e.message)}finally{submitting.current=false;setBusy(false)}}}>{children}{error&&<div className="form-error" role="alert"><AlertCircle size={17}/>{error}</div>}<Button disabled={busy||disabled} type="submit" className="form-submit">{busy?<LoaderCircle className="spin" size={18}/>:submit}<ArrowRight size={17}/></Button></form>}
-export default function App({initialPage='home'}){
- const [website,setWebsite]=useState({content:{},customer_portal_enabled:true,provider_portal_enabled:true,registration_enabled:true,bookings_enabled:true}),[towns,setTowns]=useState(defaultLocations);
- const site=website.content||{};
- const [page,setPage]=useState(initialPage),[catalog,setCatalog]=useState(defaults),[providers,setProviders]=useState([]),[me,setMe]=useState(null),[location,setLocation]=useState('Pattambi'),[category,setCategory]=useState('Home care'),[query,setQuery]=useState(''),[modal,setModal]=useState(null),[toast,setToast]=useState(''),[mobile,setMobile]=useState(false),[lang,setLang]=useState('en'),[refresh,setRefresh]=useState(0),[configured,setConfigured]=useState(false);
- const notify=useCallback(msg=>{setToast(msg);setTimeout(()=>setToast(''),5000)},[]);
- const reload=()=>setRefresh(x=>x+1);
- useEffect(()=>{const saved=localStorage.getItem('lm-location');if(saved)setLocation(saved)},[]);
- useEffect(()=>{api('/website').then(setWebsite).catch(()=>{});api('/catalog').then(d=>{setCatalog(d.services);setConfigured(d.configured);if(Array.isArray(d.locations))setTowns(d.locations)}).catch(()=>{});api('/providers').then(setProviders).catch(()=>{});api('/me').then(setMe).catch(()=>setMe(null))},[refresh]);
- const go=p=>{setPage(p);setMobile(false);window.scrollTo({top:0,behavior:'smooth'})};
- const open=m=>setModal(m);
- const requireUser=fn=>me?fn():open({type:'signin'});
- const serviceCategories=[...new Set([...categories,...catalog.map(s=>s.category)])];
- const filtered=catalog.filter(s=>(page==='services'?category==='All services'||s.category===category:s.category===category)&&(!query||(s.name+' '+s.description+' '+s.category).toLowerCase().includes(query.toLowerCase())));
- const search=e=>{e?.preventDefault();setCategory('All services');go('services')};
- const context={me,notify,reload,refresh,go,open,requireUser,catalog,providers,location,configured,website,locations:towns};
- return <><div className="announcement"><span className="live-dot"/> {site.announcement||'A little help, right around the corner.'} <span className="announcement-extra">Now growing in Pattambi, Kerala.</span><button onClick={()=>open({type:'location'})}>Explore your neighbourhood <ArrowRight size={13}/></button></div>
- <header><div className="nav-shell"><button className="brand" onClick={()=>go('home')} aria-label="Local Mate home"><span className="brand-mark"><House size={25} strokeWidth={2.7}/></span><span>{site.site_name&&site.site_name!=='Local Mate'?site.site_name:<>local<span className="brand-mate">mate</span></>}<i/></span></button><nav className={mobile?'open':''}>{[['home','Home'],['services','Services'],['how','How it works']].map(([key,label])=><button className={page===key?'active':''} onClick={()=>{if(key==='services')setCategory('All services');go(key)}} key={key}>{lang==='ml'?{Home:'ഹോം',Services:'സേവനങ്ങൾ','How it works':'എങ്ങനെ പ്രവർത്തിക്കുന്നു'}[label]:label}</button>)}<button onClick={()=>go('provider')}>Become a pro <ArrowUpRight size={13}/></button></nav><div className="nav-actions"><button className="location-button" onClick={()=>open({type:'location'})}><MapPin size={17}/><span>{location}</span><ChevronDown size={13}/></button><button className="language-button" aria-label="Switch language" onClick={()=>{setLang(lang==='en'?'ml':'en');notify(lang==='en'?'മലയാളം നാവിഗേഷൻ തിരഞ്ഞെടുത്തു. കൂടുതൽ വിവർത്തനങ്ങൾ ഉടൻ.':'English navigation selected.')}}>{lang==='en'?'മ':'EN'}</button>{me?<><button className="notification-button" aria-label="Notifications" onClick={()=>open({type:'notifications'})}><Bell size={20}/></button><button className="avatar" onClick={()=>go('bookings')} aria-label="Your account">{me.name?.[0]?.toUpperCase()||'M'}</button></>:<Button onClick={()=>open({type:'signin'})}>Log in <ArrowRight size={15}/></Button>}<button className="mobile-toggle" onClick={()=>setMobile(!mobile)} aria-label="Toggle navigation">{mobile?<X/>:<Menu/>}</button></div></div></header>
- <main>{me?.must_change_password?<section className="section-shell content-page"><div className="eyebrow muted">FINISH ACCOUNT SETUP</div><h1>Make this account yours.</h1><CredentialsPanel me={me} api={api} notify={notify} reload={reload} required/></section>:website.maintenance_mode&&!me?.admin?<section className="section-shell content-page"><h1>We’ll be back soon.</h1><p>The website is temporarily paused. Administrators can sign in to manage the site.</p><Button onClick={()=>open({type:'signin'})}>Administrator sign in</Button></section>:!me?.admin&&((['bookings','profile','addresses','payments','messages'].includes(page)&&!website.customer_portal_enabled)||(page==='provider'&&!website.provider_portal_enabled))?<section className="section-shell content-page"><h1>This portal is temporarily paused.</h1><p>Please check back later or contact support.</p></section>:page==='home'?<>
- <section className="hero section-shell"><div className="hero-copy"><div className="eyebrow"><span className="live-dot"/> YOUR NEIGHBOURHOOD, TAKEN CARE OF</div><h1>{lang==='ml'?<>നിങ്ങളുടെ വീട്.<br/>നമ്മുടെ ആളുകൾ.<br/><em>സഹായം അടുത്തുണ്ട്.</em></>:<>{site.hero_line_1||'Your home.'}<br/>{site.hero_line_2||'Our people.'}<br/><em>{site.hero_line_3||'Consider it done.'}</em></>}</h1><p>{site.hero_description||'From a leaky tap to a fresh coat of paint. Find a trusted helping hand, close to home.'}</p><form className="hero-search" onSubmit={search}><Search size={21}/><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="What can we help you with?" aria-label="Search services"/><button aria-label="Find a service"><ArrowRight size={22}/></button></form><div className="popular-search"><span>Popular:</span>{['Cleaning','Plumbing','AC repair'].map(x=><button key={x} onClick={()=>{setQuery(x==='AC repair'?'AC':x);setCategory('All services');go('services')}}>{x}<ArrowUpRight size={11}/></button>)}</div><div className="hero-proof"><span className="little-houses"><House size={15}/><Heart size={15}/><Check size={15}/></span><span>Local skills. A little more peace of mind.</span></div></div>
- <div className="hero-art"><div className="art-label"><span/><span>GOOD HELP. RIGHT HERE.</span><span/></div><img className="house-art" src="/assets/house.svg" alt="A welcoming white home with a blue roof, surrounded by green trees"/><div className="floating-card verified-card"><span className="floating-icon"><ShieldCheck size={26}/></span><div><strong>Good hands. Great care.</strong><small>Verified before your first booking</small></div><span className="tiny-check"><Check size={11}/></span></div><div className="floating-card price-card"><span className="rupee-icon">₹</span><div><strong>A fair price.<br/>A clear promise.</strong><small>Approve your quote first.</small></div></div><div className="local-label"><span className="live-dot"/>Rooted in Pattambi. Made for you.</div><span className="art-spark spark-one">✦</span><span className="art-spark spark-two">✧</span></div></section>
- <div className="trust-strip section-shell">{[[ShieldCheck,'Carefully verified','People you can feel good about'],[CalendarDays,'Fits your day','Choose a time that works for you'],[Wallet,'Upfront & transparent','Know the price before we begin'],[Headphones,'Here when you need us','A local team, just a message away']].map(([Icon,heading,desc])=><div key={heading}><Icon size={25} strokeWidth={1.7}/><span><strong>{heading}</strong><small>{desc}</small></span></div>)}</div>
- <section className="services-section section-shell" id="services"><div className="section-heading"><div><div className="eyebrow muted">A LITTLE HELP GOES A LONG WAY</div><h2>What’s on your to-do list?</h2></div><button className="text-link" onClick={()=>{setQuery('');setCategory('All services');go('services')}}>Explore all services <ArrowRight size={17}/></button></div><div className="category-tabs">{serviceCategories.map((c,i)=><button className={category===c?'selected':''} onClick={()=>{setCategory(c);setQuery('')}} key={c}>{[<House size={16}/>,<Navigation size={16}/>,<Building2 size={16}/>,<Settings size={16}/>,<BriefcaseBusiness size={16}/>,<CalendarDays size={16}/>,<Heart size={16}/>][i]}{c}</button>)}</div><div className="service-grid">{filtered.slice(0,6).map(s=><ServiceCard key={s.id} count={providers.filter(p=>array(p.service_ids).includes(s.id)&&array(p.locations).includes(location)).length} service={s} onClick={()=>open({type:'service',service:s})}/>)}</div><div className="service-foot"><ShieldCheck size={14}/><span>Simple bookings. Clear estimates. No unexpected extras.</span><small>Final price confirmed by your provider.</small></div></section>
- <section className="how-section" id="how"><div className="section-shell"><div className="section-heading"><div><div className="eyebrow muted">LESS TO DO. MORE LIFE TO LIVE.</div><h2>A helping hand, in four easy steps.</h2></div><p>We take care of the little things.<br/>So you can get back to your things.</p></div><div className="steps">{[[Search,'01','Find your service','Tell us what needs a little attention.'],[CalendarDays,'02','Make it your time','Pick a date and a time that suit you.'],[UserRound,'03','Meet your local mate','An approved professional accepts your request.'],[CheckCircle2,'04','Sit back. We’ve got this.','Your job gets done. You get your day back.']].map(([Icon,n,t,d])=><div className="step" key={n}><div className="step-top"><span><Icon size={25}/></span><small>{n}</small></div><h3>{t}</h3><p>{d}</p></div>)}</div></div></section>
- <section className="neighbourhood section-shell"><div><div className="eyebrow muted">LOCAL IS A LOVELY THING</div><h2>Your neighbours.<br/>Your next helping hands.</h2><p>Great work starts with people who know the place.<br/>We’re bringing Pattambi’s local skills together,<br className="desktop"/> one trusted professional at a time.</p><button className="text-link" onClick={()=>go('providers')}>Meet the neighbourhood <ArrowRight size={17}/></button><div className="towns"><MapPin size={15}/>{location}, Kerala <span>•</span> Growing locally</div></div><div className="join-card"><div className="join-illustration"><span>🧰</span><span className="join-badge"><Check size={16}/></span></div><div className="eyebrow">GOOD AT WHAT YOU DO?</div><h3>There’s a place<br/>for you here.</h3><p>Turn your skills into opportunities.<br/>Work locally. Grow on your terms.</p><Button onClick={()=>go('provider')}>Become a Local Mate <ArrowRight size={17}/></Button><small>No joining fee. Just your skills and a little heart.</small></div></section>
- <section className="bottom-banner section-shell"><div className="banner-icon"><House size={29}/><Heart size={14}/></div><div><h3>A happier home starts with a little help.</h3><p>{site.tagline||'Your neighbourhood. Your trusted helpers.'}</p></div><Button onClick={()=>{setCategory('All services');setQuery('');go('services')}}>Find your helping hand <ArrowRight size={17}/></Button></section>
- </>:page==='services'?<section className="section-shell listing"><div className="breadcrumb"><button onClick={()=>go('home')}>Home</button><ChevronRight size={13}/>Services</div><div className="eyebrow muted">SOMETHING OFF YOUR LIST</div><h1>Good help, for everyday life.</h1><p className="subtitle">Find the right service in {location}. One less thing to worry about.</p><form className="listing-search" onSubmit={e=>e.preventDefault()}><Search size={19}/><input placeholder="Search services…" value={query} onChange={e=>setQuery(e.target.value)}/><button type="button" onClick={()=>open({type:'location'})}><MapPin size={16}/>{location}<ChevronDown size={13}/></button></form><div className="category-tabs">{['All services',...serviceCategories].map(c=><button key={c} className={category===c?'selected':''} onClick={()=>setCategory(c)}>{c}</button>)}</div><div className="list-count">{filtered.length} services <span>Estimates in INR · Final quote before work begins</span></div>{filtered.length?<div className="service-grid listing-grid">{filtered.map(s=><ServiceCard count={providers.filter(p=>array(p.service_ids).includes(s.id)&&array(p.locations).includes(location)).length} service={s} onClick={()=>open({type:'service',service:s})} key={s.id}/>)}</div>:<Empty icon={Search} title="Let’s try another search">No services match “{query}”. Try a different name or category.</Empty>}</section>
- :page==='how'?<section className="section-shell content-page"><div className="eyebrow muted">A LITTLE LESS COMPLICATED</div><h1>From to-do to all done.</h1><p className="subtitle">A simple way to find help in your neighbourhood.</p><div className="steps vertical">{[['Choose a service','Browse local services and tell us what you need. Fixed services show a starting estimate; larger projects start with a quote.'],['Pick your place and time','Add your address, preferred date and time, and a few details. We only accept bookings where an approved provider is available.'],['Confirm your helping hand','A suitable provider accepts your request. For quotation-based work, you review and approve the quote before the job is confirmed.'],['Stay in the loop','Message your provider and follow status updates from confirmation to completion. Pay after service and leave a review for a completed booking.']].map(([t,d],i)=><div className="step" key={t}><span className="step-number">0{i+1}</span><div><h3>{t}</h3><p>{d}</p></div></div>)}</div><Button onClick={()=>{setCategory('All services');go('services')}}>Find a service <ArrowRight size={17}/></Button></section>
- :page==='providers'?<ProviderDirectory {...context}/>
- :page==='provider'?<ProviderPortal {...context}/>
- :page==='admin'?<AdminPortal {...context}/>
- :page==='support'?<Support {...context}/>
- :['bookings','profile','addresses','payments','messages'].includes(page)?<CustomerPortal {...context} tab={page}/>:null}</main>
- <footer className="section-shell"><div className="footer-top"><div><button className="brand" onClick={()=>go('home')}><span className="brand-mark"><House size={22}/></span><span>{site.site_name&&site.site_name!=='Local Mate'?site.site_name:<>local<span className="brand-mate">mate</span></>}<i/></span></button><p>{site.tagline||'Your neighbourhood. Your trusted helpers.'}</p><span className="made-local"><Heart size={13}/> Made for our neighbourhood.</span></div><div><strong>Find a little help</strong><button onClick={()=>{setCategory('All services');go('services')}}>All services</button><button onClick={()=>go('providers')}>Find a professional</button><button onClick={()=>go('how')}>How it works</button><button onClick={()=>go('bookings')}>My bookings</button></div><div><strong>Grow with us</strong><button onClick={()=>go('provider')}>Become a Local Mate</button><button onClick={()=>go('provider')}>Provider portal</button><button onClick={()=>go('admin')}>Admin portal</button><button onClick={()=>open({type:'about'})}>About Local Mate</button></div><div><strong>We’re here to help</strong><button onClick={()=>go('support')}>Help & support</button><button onClick={()=>open({type:'faq'})}>Common questions</button><button onClick={()=>open({type:'policy',policy:'cancellation'})}>Cancellations & refunds</button>{site.contact_phone&&<a className="text-link" href={'tel:'+site.contact_phone.replace(/[^0-9+]/g,'')}>{site.contact_phone}</a>}<div className="footer-location"><MapPin size={14}/> {site.contact_address||'Pattambi, Kerala, India'}</div></div></div><div className="footer-bottom"><span>© {new Date().getFullYear()} Local Mate. A little closer to home.</span><div><button onClick={()=>open({type:'policy',policy:'privacy'})}>Privacy policy</button><button onClick={()=>open({type:'policy',policy:'terms'})}>Terms of service</button><span><Globe size={13}/> English / മലയാളം</span></div></div></footer>
- {modal&&<Modal modal={modal} close={()=>setModal(null)} {...context} setLocation={v=>{setLocation(v);localStorage.setItem('lm-location',v)}}/>}{toast&&<div className="toast" role="status"><CheckCircle2 size={20}/>{toast}<button onClick={()=>setToast('')} aria-label="Dismiss notification"><X size={15}/></button></div>}</>
+"use client";
+import React, { useState, useEffect, useCallback } from "react";
+import { readRecord } from "../lib/provider-data.mjs";
+import { adminRows } from "../lib/admin-data.mjs";
+import { VoiceProvider, CallHistory, useVoiceState } from "./voice/provider";
+import { BookingOperations, InvoiceHistory } from "./operations/booking";
+import { OperationsAdmin } from "./operations/admin";
+import { ProviderOperationsPortal } from "./operations/provider-portal";
+import { upload, PrivateImage } from "./operations/shared";
+import {
+  ProviderAvailability,
+  ProviderEditor,
+  ProviderRates,
+  Rating,
+  ServiceProviders,
+  PlacePicker,
+  SavedPlaceForm,
+  BookingContact,
+  BookingTracking,
+  MessagesInbox,
+  ServiceRoster,
+  array,
+} from "./marketplace-tools";
+import { getBrowserClient } from "../lib/supabase/browser";
+import { AdminTools, AdminUserActions, CredentialsPanel } from "./admin-tools";
+import {
+  House,
+  MapPin,
+  ChevronDown,
+  ArrowRight,
+  Search,
+  ShieldCheck,
+  CalendarDays,
+  Wallet,
+  Check,
+  CheckCircle2,
+  Clock,
+  Menu,
+  X,
+  Plus,
+  UserRound,
+  Bell,
+  BriefcaseBusiness,
+  MessageSquare,
+  LayoutDashboard,
+  LogOut,
+  Settings,
+  Users,
+  ClipboardList,
+  Heart,
+  Headphones,
+  Star,
+  ChevronRight,
+  ArrowUpRight,
+  Leaf,
+  Navigation,
+  SlidersHorizontal,
+  Download,
+  Send,
+  Globe,
+  Mail,
+  AlertCircle,
+  LoaderCircle,
+  Building2,
+  Phone,
+} from "lucide-react";
+import {
+  services as defaults,
+  categories,
+  locations as defaultLocations,
+  workflow,
+} from "./catalog.js";
+const rupees = (n) => "₹" + Number(n || 0).toLocaleString("en-IN");
+const title = (s) =>
+  (s || "").replaceAll("_", " ").replace(/\b\w/g, (c) => c.toUpperCase());
+const date = (s) =>
+  new Date(s).toLocaleString("en-IN", {
+    dateStyle: "medium",
+    timeStyle: "short",
+    timeZone: "Asia/Kolkata",
+  });
+async function api(path, body, method) {
+  const r = await fetch("/api" + path, {
+    method: method || (body ? "POST" : "GET"),
+    headers: body ? { "content-type": "application/json" } : {},
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const d = await r.json();
+  if (!r.ok)
+    throw Object.assign(new Error(d.error || "Please try again."), {
+      status: r.status,
+      code: d.code,
+      retryAfterSeconds:
+        Number(d.retryAfterSeconds || r.headers.get("Retry-After")) ||
+        undefined,
+    });
+  return d;
 }
-function ServiceCard({service:s,onClick,count=0}){return <button className="service-card" onClick={onClick}><div className={'service-image '+s.tone}>{['cleaning','plumbing','electrical','ac','painting','carpentry'].includes(s.id)?<img src={'/assets/'+s.id+'.png'} alt=""/>:<span>{s.icon}</span>}<span className="service-arrow"><ArrowUpRight size={16}/></span></div><h3>{s.name}</h3><div className="service-price">{s.price?<><span>Est. from</span> <strong>{rupees(s.price)}</strong></>:<span>Get a personalised quote</span>}</div><small className="service-count">{count} local provider{count===1?'':'s'} · View rates</small></button>}
-function AccountGate({heading,children,open}){return <section className="section-shell content-page"><div className="eyebrow muted">YOUR LOCAL MATE</div><h1>{heading}</h1><Empty icon={UserRound} title="A little closer starts here" action={<Button onClick={()=>open({type:'signin'})}>Sign in to continue <ArrowRight size={16}/></Button>}>{children}</Empty></section>}
-function CustomerPortal(props){const {me,tab,go,open,notify,refresh}=props;const [bookings,setBookings]=useState([]),[addresses,setAddresses]=useState([]),[payments,setPayments]=useState([]),[loading,setLoading]=useState(true),[error,setError]=useState('');useEffect(()=>{if(!me)return;setLoading(true);Promise.all([api('/bookings'),api('/addresses'),api('/payments')]).then(([a,b,c])=>{setBookings(a);setAddresses(b);setPayments(c)}).catch(e=>setError(e.message)).finally(()=>setLoading(false))},[me,refresh]);useEffect(()=>{if(!me)return;let alive=true;const timer=setInterval(()=>api('/bookings').then(d=>{if(alive)setBookings(d)}).catch(e=>{if(alive)setError(e.message)}),15000);return()=>{alive=false;clearInterval(timer)}},[me]);if(!me)return <AccountGate heading="Your home for getting things done." open={open}>Sign in to manage your bookings, addresses and messages.</AccountGate>;
- return <section className="section-shell portal"><div className="portal-heading"><div><div className="eyebrow muted">YOUR NEIGHBOURHOOD, YOUR SPACE</div><h1>Hello, {me.name.split(' ')[0]}<span className="wave"> 👋</span></h1><p>Let’s take a few things off your list.</p></div><Button onClick={()=>go('services')}>Book a service <Plus size={17}/></Button></div><div className="portal-layout"><aside>{[['bookings',ClipboardList,'My bookings'],['messages',MessageSquare,'Messages'],['profile',UserRound,'My profile'],['addresses',MapPin,'Saved addresses'],['payments',Wallet,'Payments'],['support',Headphones,'Help & support']].map(([k,Icon,t])=><button className={tab===k?'selected':''} onClick={()=>go(k)} key={k}><Icon size={18}/>{t}</button>)}<button onClick={async()=>{try{await api('/auth/signout',{});props.reload();props.notify('You’ve signed out.')}catch(e){props.notify(e.message)}}}><LogOut size={17}/>Sign out</button></aside><div className="portal-content">{error&&<p className="form-error">{error}</p>}{tab==='messages'?<div className="panel"><MessagesInbox bookings={bookings} me={me} api={api} open={open}/></div>:tab==='bookings'?<><div className="stats-grid"><Stat label="Upcoming" value={bookings.filter(b=>!['cancelled','work_completed'].includes(b.status)).length}/><Stat label="Completed" value={bookings.filter(b=>b.status==='work_completed').length}/><Stat label="Total bookings" value={bookings.length}/></div><div className="panel"><h2>Your bookings</h2><p className="muted-copy">Open a booking to message or call your provider, follow job progress and view shared GPS.</p>{loading?<Loading/>:bookings.length?bookings.map(b=><BookingRow key={b.id} booking={b} onClick={()=>open({type:'booking',id:b.id})}/>):<Empty title="Your to-do list starts here" action={<Button secondary onClick={()=>go('services')}>Explore services <ArrowRight size={16}/></Button>}>No bookings yet. When you need a hand, we’re right here.</Empty>}</div></>:tab==='profile'?<div className="panel"><h2>A little about you</h2><CredentialsPanel me={me} api={api} notify={notify} reload={props.reload}/><Form onSubmit={async data=>{await api('/profile',data);props.reload();notify('Your profile has been updated.')}}><Field label="Your name"><input name="name" defaultValue={me.name} required maxLength={100}/></Field><Field label="Username"><input value={me.username||''} readOnly/></Field><Field label="Indian mobile number" hint="Used for booking coordination. Published only if you enable it in your provider profile."><input name="phone" type="tel" placeholder="+919876543210" defaultValue={me.phone} required pattern="(\+91)?[6-9][0-9]{9}"/></Field></Form></div>:tab==='addresses'?<div className="panel"><div className="panel-heading"><h2>Your saved places</h2><Button secondary onClick={()=>open({type:'address'})}><Plus size={16}/>Add address</Button></div>{addresses.length?addresses.map(a=><div className="address-card" key={a.id}><MapPin size={22}/><div><h3>{a.label}</h3><p>{a.address}</p><small>{a.location}</small></div><button className="text-link" onClick={()=>open({type:'address',address:a})}>Edit</button><button className="subtle" onClick={()=>open({type:'confirm',heading:'Delete this address?',description:'You can add it again later.',action:async()=>{await api('/addresses/'+a.id,undefined,'DELETE');props.reload();notify('Address removed.')}})}>Remove</button></div>):<Empty icon={MapPin} title="Every home has an address">Save your places for an easier booking next time.</Empty>}</div>:<div className="panel"><h2>Payments & receipts</h2><p className="muted-copy">Online payments appear only after server verification. Cash payments remain pending until recorded.</p>{payments.length?payments.map(p=><div className="table-row" key={p.id}><Wallet size={20}/><div><strong>{rupees(p.amount)}</strong><small>{date(p.created_at)}</small></div><Status value={p.status}/></div>):<Empty icon={Wallet} title="Nothing to pay here yet">Your verified online transactions will appear here.</Empty>}</div>}</div></div></section>
+function IconBox({ icon: Icon, tone = "blue", children }) {
+  return (
+    <span className={"icon-box " + tone}>
+      {Icon ? <Icon size={22} /> : children}
+    </span>
+  );
 }
-function Stat({label,value}){return <div className="stat"><span>{label}</span><strong>{value}</strong></div>}
-function Status({value}){return <span className={'status '+value}>{title(value)}</span>}
-function BookingRow({booking:b,onClick}){return <button className="booking-row" onClick={onClick}><span className="booking-symbol"><BriefcaseBusiness size={21}/></span><span className="booking-info"><strong>{b.service_name}</strong><small>{date(b.scheduled_at)} · {b.location}</small>{b.provider_name&&<small>With {b.provider_name}</small>}</span><Status value={b.status}/><ChevronRight size={17}/></button>}
-function Loading(){return <div className="loading"><LoaderCircle className="spin" size={23}/> Just a moment…</div>}
-function ProviderDirectory({providers,open,location,go,requireUser,notify,catalog}){const [q,setQ]=useState(''),[sort,setSort]=useState('recommended');const shown=providers.filter(p=>array(p.locations).includes(location)&&(p.name+' '+p.category+' '+p.description).toLowerCase().includes(q.toLowerCase())).sort((a,b)=>sort==='rating'?(b.rating||0)-(a.rating||0):sort==='experience'?b.experience-a.experience:0);return <section className="section-shell content-page"><div className="eyebrow muted">GOOD PEOPLE. GREAT WORK.</div><h1>Meet your local helping hands.</h1><p className="subtitle">Approved professionals serving {location}. Real people, close to home.</p><div className="filter-row"><div className="listing-search"><Search size={19}/><input value={q} onChange={e=>setQ(e.target.value)} placeholder="Search a name or skill"/></div><select aria-label="Sort providers" value={sort} onChange={e=>setSort(e.target.value)}><option value="recommended">Recommended</option><option value="rating">Highest rated</option><option value="experience">Most experience</option></select></div>{shown.length?<div className="provider-grid">{shown.map(p=><div className="panel provider-card" key={p.user_id}><div className="provider-top"><span className="provider-avatar">{p.name[0]}</span><button aria-label="Save provider" onClick={()=>requireUser(async()=>{try{await api('/favourites',{provider_id:p.user_id});notify('Provider saved to favourites.')}catch(e){notify(e.message)}})}><Heart size={18}/></button></div><h3>{p.business_name||p.name} <ShieldCheck size={17}/></h3><p>{p.description}</p><small>{p.experience} years of experience · {p.category}</small><ProviderRates provider={p} catalog={catalog}/><Button secondary onClick={()=>open({type:'provider-detail',provider:p})}>View profile <ArrowRight size={16}/></Button></div>)}</div>:<Empty icon={Users} title="Your neighbourhood is coming together" action={<Button onClick={()=>go('provider')}>Be one of our first professionals <ArrowRight size={16}/></Button>}>No approved professionals match this search in {location} yet. We’re welcoming local skills, one person at a time.</Empty>}</section>}
-function ProviderPortal(props){const {me,open,go,notify,reload,refresh,catalog}=props;const [tab,setTab]=useState('requests'),[bookings,setBookings]=useState([]),[busy,setBusy]=useState(false),[error,setError]=useState('');useEffect(()=>{if(!me?.provider)return;let alive=true;const load=()=>api('/bookings?role=provider').then(d=>{if(alive){setBookings(d);setError('')}}).catch(e=>{if(alive)setError(e.message)});load();const timer=setInterval(load,15000);return()=>{alive=false;clearInterval(timer)}},[me,refresh]);
- if(!me?.provider)return <section className="section-shell provider-intro"><div><div className="eyebrow muted">MAKE A LIVING. MAKE A DIFFERENCE.</div><h1>Your skills.<br/>Your neighbourhood.<br/><em>Your next chapter.</em></h1><p>Join Local Mate and connect with people who need what you do best. Work in your area, manage your own time, and grow with your community.</p><div className="benefit-list">{['No joining fee','Choose the areas you serve','Accept the jobs that work for you','Clear, transparent earnings'].map(t=><span key={t}><CheckCircle2 size={18}/>{t}</span>)}</div><Button onClick={()=>me?open({type:'register-provider'}):open({type:'signin'})}>Join your local community <ArrowRight size={17}/></Button><small>All applications are reviewed before bookings are enabled.</small></div><div className="provider-intro-art"><span>🧰</span><h3>A little skill.<br/>A lot of possibility.</h3><div><MapPin size={15}/> Starting in Pattambi, Kerala</div></div></section>;
- const pr=me.provider,done=bookings.filter(b=>b.status==='work_completed'),requests=bookings.filter(b=>b.status==='requested'),active=bookings.filter(b=>b.provider_id===me.id&&!['work_completed','cancelled'].includes(b.status));
- return <section className="section-shell portal"><div className="portal-heading"><div><div className="eyebrow muted">THE PEOPLE BEHIND THE HELP</div><h1>Your work. Your way.</h1><p>Welcome back, {me.name}.</p></div><Status value={pr.status}/></div>{pr.status!=='approved'&&<div className="notice"><ShieldCheck size={22}/><div><strong>{pr.status==='pending'?'Your application is under review.':'Your provider account is '+pr.status+'.'}</strong><p>You’ll receive an in-app notification when your status changes. Bookings are available only to approved providers.</p></div></div>}<div className="stats-grid"><Stat label="New requests" value={requests.length}/><Stat label="Active jobs" value={active.length}/><Stat label="Completed" value={done.length}/><Stat label="Completed job value" value={rupees(done.reduce((a,b)=>a+b.estimated_price,0))}/></div><div className="portal-tabs">{['requests','jobs','messages','earnings','availability','profile','support'].map(t=><button className={tab===t?'selected':''} onClick={()=>setTab(t)} key={t}>{title(t)}</button>)}</div>{error&&<p className="form-error">{error}</p>}<div className="panel">{tab==='messages'?<MessagesInbox bookings={bookings} me={me} api={api} open={open}/>:tab==='support'?<Support {...props}/>:tab==='requests'||tab==='jobs'?<><h2>{tab==='requests'?'New booking requests':'Your active jobs'}</h2>{(tab==='requests'?requests:active).length?(tab==='requests'?requests:active).map(b=><BookingRow key={b.id} booking={b} onClick={()=>open({type:'booking',id:b.id,role:'provider'})}/>):<Empty icon={BriefcaseBusiness} title={tab==='requests'?'Room for your next opportunity':'A clear workday'}>{tab==='requests'?'Eligible requests in your service area appear here when you are approved and online.':'Your accepted jobs will appear here.'}</Empty>}</>:tab==='earnings'?<><h2>Clear numbers. No surprises.</h2><p className="muted-copy">Completed job value is not a payout balance. Online receipts, platform commission and provider payouts require reconciliation. Cash is paid directly to you.</p>{done.length?done.map(b=><div className="table-row" key={b.id}><div><strong>{b.service_name}</strong><small>{date(b.scheduled_at)}</small></div><strong>{rupees(b.estimated_price)}</strong><Status value={b.payment_status}/></div>):<Empty icon={Wallet} title="Your work will add up">Completed jobs and their payment status will appear here.</Empty>}<Button secondary onClick={()=>downloadCSV(done.map(b=>({id:b.id,service:b.service_name,amount:b.estimated_price,payment:b.payment_status})),'local-mate-earnings.csv')}><Download size={16}/>Download statement</Button></>:tab==='availability'?<ProviderAvailability provider={pr} api={api} reload={reload} notify={notify}/>:<><CredentialsPanel me={me} api={api} notify={notify} reload={reload}/><ProviderEditor key={me.id+':'+JSON.stringify(pr)} me={me} catalog={catalog} locations={props.locations} api={api} notify={notify} reload={reload}/></>}</div></section>
+function Empty({
+  icon: Icon = ClipboardList,
+  title: heading,
+  children,
+  action,
+}) {
+  return (
+    <div className="empty">
+      <Icon size={36} strokeWidth={1.4} />
+      <h3>{heading}</h3>
+      <p>{children}</p>
+      {action}
+    </div>
+  );
 }
-function AdminPortal(props){
- const {me,open,notify,reload,refresh,go}=props;
- const [tab,setTab]=useState('overview'),[result,setResult]=useState(null),[error,setError]=useState(''),[overview,setOverview]=useState(null),[overviewError,setOverviewError]=useState(''),[retry,setRetry]=useState(0);
- const endpoint={providers:'providers',services:'services',users:'users',logs:'logs'};
- const resultKey=[me?.id,tab,refresh,retry].join(':');
- const current=result?.key===resultKey?result:null;
- const data=current?.items??null;
- const dataError=current?.error||'';
- useEffect(()=>{
-  if(!me?.admin)return;
-  let active=true;setOverviewError('');
-  api('/admin/overview').then(value=>{if(active)setOverview(value)}).catch(e=>{if(active)setOverviewError(e.message)});
-  return()=>{active=false};
- },[me?.id,me?.admin,refresh]);
- useEffect(()=>{
-  if(!me?.admin)return;
-  let active=true;setError('');
-  const path=tab==='bookings'?'/bookings?role=admin':tab==='support'?'/support':endpoint[tab]?'/admin/'+endpoint[tab]:null;
-  if(path){
-   api(path).then(value=>{const items=adminRows(tab,value);if(active)setResult({key:resultKey,items,error:''})})
-    .catch(e=>{if(active)setResult({key:resultKey,items:null,error:e.message})});
-  }
-  return()=>{active=false};
- },[me?.id,me?.admin,tab,refresh,retry]);
- if(!me)return <AccountGate heading="Your neighbourhood, in good hands." open={open}>Sign in with your administrator username and password.</AccountGate>;
- if(!me.admin)return <section className="section-shell content-page"><h1>Administrator access</h1><div className="notice"><ShieldCheck size={25}/><div><strong>This area is for authorized administrators.</strong><p>You’re signed in as {me.username||me.name}. Contact your administrator if you need access.</p></div></div><Button secondary onClick={()=>go('bookings')}>Go to my account</Button></section>;
- const tabs=[['overview',LayoutDashboard],['bookings',ClipboardList],['providers',Users],['services',BriefcaseBusiness],['users',UserRound],['content',House],['locations',MapPin],['support',Headphones],['backup',Download],['data',AlertCircle],['settings',Settings],['logs',Clock]];
- return <section className="section-shell portal"><div className="portal-heading"><div><div className="eyebrow muted">YOUR WEBSITE, IN GOOD HANDS</div><h1>Local Mate administration</h1><p>Manage customers, professionals, bookings and your website.</p></div><span className="status approved">Administrator · {me.username}</span></div>{error&&<p className="form-error">{error}</p>}<div className="portal-layout"><aside>{tabs.map(([t,Icon])=><button key={t} className={tab===t?'selected':''} onClick={()=>setTab(t)}><Icon size={18}/>{t==='content'?'Website & portals':t==='data'?'Delete all data':title(t)}</button>)}</aside><div className="portal-content">
- {['content','locations','backup','data'].includes(tab)?<AdminTools tab={tab} api={api} {...props}/>:tab==='overview'?<>{overviewError&&<p className="form-error" role="alert">{overviewError}</p>}{overview?<div className="stats-grid"><Stat label="Customer accounts" value={overview.customers}/><Stat label="Providers" value={overview.providers}/><Stat label="Pending approvals" value={overview.pending}/><Stat label="Bookings" value={overview.bookings}/><Stat label="Verified payments" value={rupees(overview.paid)}/></div>:<Loading/>}<div className="panel"><h2>Set up your neighbourhood</h2><p>Initialize the default services and towns, review providers, or edit your website and portal settings.</p><div className="actions"><Button onClick={async()=>{try{await api('/setup',{});reload();notify('Services and locations are ready.')}catch(e){setError(e.message)}}}>Initialize default services <Plus size={16}/></Button><Button secondary onClick={()=>setTab('content')}>Website controls <Settings size={16}/></Button></div></div></>:tab==='settings'?<><CredentialsPanel me={me} api={api} notify={notify} reload={reload}/><div className="panel"><h2>Commission settings</h2><Form onSubmit={async d=>{await api('/admin/commission',{percent:Number(d.percent)});reload();notify('Commission setting saved.')}}><Field label="Platform commission (%)" hint="This saves a rate; no payment or payout is initiated automatically."><input name="percent" type="number" min="0" max="100" step="0.1" defaultValue={overview?.commission??10} required/></Field></Form></div></>:<div className="panel"><div className="panel-heading"><h2>{title(tab)}</h2>{tab==='providers'&&<Button secondary onClick={()=>open({type:'edit-provider'})}><Plus size={15}/>Add provider</Button>}{tab==='services'&&<Button secondary onClick={()=>open({type:'edit-service'})}><Plus size={15}/>Add service</Button>}{tab==='bookings'&&<Button secondary onClick={()=>downloadCSV(data||[],'local-mate-bookings.csv')}><Download size={15}/>Export</Button>}</div>
- {dataError?<div className="admin-list-error"><p className="form-error" role="alert">{dataError}</p><Button secondary onClick={()=>setRetry(n=>n+1)}>{tab==='providers'?'Retry provider list':'Retry loading list'}</Button></div>:!data?<Loading/>:!data.length?<Empty title="Nothing here yet">New activity appears here as your marketplace grows.</Empty>:tab==='bookings'?data.map(b=><div key={b.id}><BookingRow booking={b} onClick={()=>open({type:'booking',id:b.id,role:'admin'})}/><button className="text-link row-extra" onClick={()=>open({type:'assign',booking:b})}>Assign or reassign provider</button></div>):tab==='providers'?data.map(p=><div className="admin-provider" key={p.user_id}><div><strong>{p.business_name||p.name||'Unnamed provider'}</strong><small>{p.category} · {p.phone}</small><p>{p.description}</p><small>{array(p.locations).join(', ')} · {p.experience==null?'Experience not set':p.experience+' years'}</small></div><Status value={p.status}/><div className="actions"><Button secondary onClick={()=>open({type:'edit-provider',provider:p})}>Edit profile & rates</Button><Button secondary onClick={()=>open({type:'confirm',heading:'Approve this provider?',description:'Confirm you have reviewed their identity, qualifications and service details.',action:async()=>{await api('/admin/provider',{user_id:p.user_id,status:'approved'});reload();notify('Provider approved.')}})}>Approve</Button><button className="danger-link" onClick={()=>open({type:'confirm',heading:'Change provider status?',description:'This prevents the provider from receiving new requests.',action:async()=>{await api('/admin/provider',{user_id:p.user_id,status:p.status==='approved'?'suspended':'rejected'});reload();notify('Provider status updated.')}})}>{p.status==='approved'?'Suspend':'Reject'}</button></div></div>):tab==='services'?data.map(s=><div className="table-row" key={s.id}><span className="mini-emoji">{s.icon}</span><div><strong>{s.name}</strong><small>{s.category} · {title(s.type)} · {s.price?rupees(s.price):'Quote'}</small></div><Status value={s.active?'active':'inactive'}/><button className="text-link" onClick={()=>open({type:'service-roster',service:s})}>Manage providers</button><button className="text-link" onClick={()=>open({type:'edit-service',service:s})}>Edit</button></div>):tab==='users'?data.map(u=><div className="admin-account" key={u.id}><div className="panel-heading"><div><h3>{u.name||u.username||'Account'}</h3><small className="muted-copy">Username: {u.username||'Not set'} · {u.phone||'No phone added'}</small></div><Status value={u.is_active===false?'suspended':'active'}/></div><AdminUserActions user={u} me={me} api={api} reload={reload} notify={notify}/></div>):tab==='support'?data.map(t=><div className="ticket" key={t.id}><div><h3>{t.subject}</h3><Status value={t.status}/></div><p>{t.body}</p>{t.resolution&&<p><strong>Response: </strong>{t.resolution}</p>}<button className="text-link" onClick={()=>open({type:'resolve-ticket',ticket:t})}>Review & respond <ArrowRight size={14}/></button></div>):data.map((row,i)=><div className="table-row" key={row.id||i}><div><strong>{row.action||row.name}</strong><small>{date(row.created_at)}</small></div>{row.target_id&&<small>{row.target_id}</small>}</div>)}</div>}
- </div></div></section>;
+function Button({ children, secondary = false, className = "", ...props }) {
+  return (
+    <button
+      className={(secondary ? "button secondary " : "button ") + className}
+      {...props}
+    >
+      {children}
+    </button>
+  );
 }
-function Support({me,open,notify,refresh,reload}){const [tickets,setTickets]=useState([]),[error,setError]=useState('');useEffect(()=>{if(me)api('/support').then(setTickets).catch(e=>setError(e.message))},[me,refresh]);return <section className="section-shell content-page"><div className="eyebrow muted">WE’RE AROUND THE CORNER</div><h1>A little help with your help?</h1><p className="subtitle">Questions, booking concerns, or something we can do better. We’re listening.</p><div className="support-grid"><div className="panel"><h2>Send us a note</h2>{me?<Form submit="Create support ticket" onSubmit={async d=>{await api('/support',d);reload();notify('Your support ticket has been created.')}}><Field label="What is this about?"><input name="subject" required maxLength={200} placeholder="A booking, a payment, or something else"/></Field><Field label="Tell us a little more"><textarea name="body" required rows={5} maxLength={4000}/></Field><Field label="Booking reference (optional)"><input name="booking_id" placeholder="Booking ID, if you have one"/></Field></Form>:<Empty icon={Headphones} title="Let’s get you connected" action={<Button onClick={()=>open({type:'signin'})}>Sign in to contact support</Button>}>Sign in so your conversation stays private and easy to find.</Empty>}</div><div><div className="panel"><h2>Your support requests</h2>{error&&<p className="form-error">{error}</p>}{tickets.length?tickets.map(t=><div className="ticket" key={t.id}><div><h3>{t.subject}</h3><Status value={t.status}/></div><p>{t.body}</p>{t.resolution&&<p className="resolution">{t.resolution}</p>}<small>{date(t.created_at)}</small></div>):<p className="muted-copy">You have no open requests. We’re here whenever you need us.</p>}</div><button className="faq-link" onClick={()=>open({type:'faq'})}>Find a quick answer in our FAQs <ArrowUpRight size={18}/></button></div></div></section>}
-function downloadCSV(data,name){const keys=[...new Set(data.flatMap(Object.keys))];const safe=v=>{let s=String(v??'');if(/^[=+@\-]/.test(s))s="'"+s;return '"'+s.replaceAll('"','""')+'"'};const url=URL.createObjectURL(new Blob([keys.map(safe).join(','),...data.map(row=>keys.map(k=>safe(row[k])).join(','))].join('\n'),{type:'text/csv'}));const a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),5000)}
-function Modal({modal:m,close,...ctx}){const {me,notify,reload,open,location,setLocation,catalog,providers,locations=defaultLocations}=ctx;const site=ctx.website?.content||{};const ref=React.useRef(null);useEffect(()=>{const previous=document.activeElement;const old=document.body.style.overflow;document.body.style.overflow='hidden';const el=ref.current;el?.focus();const key=e=>{if(e.key==='Escape')close();if(e.key==='Tab'){const items=el?.querySelectorAll('button,a[href],input,select,textarea,[tabindex="0"]');const first=items?.[0],last=items?.[items.length-1];if(e.shiftKey&&document.activeElement===first){e.preventDefault();last?.focus()}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first?.focus()}}};document.addEventListener('keydown',key);return()=>{document.body.style.overflow=old;document.removeEventListener('keydown',key);previous?.focus()}},[m.type]);const heading={'edit-provider':m.provider?'Edit provider':'Add provider','service-roster':'Manage service providers',signin:'A little closer to home.',location:'Where can we lend a hand?',service:m.service?.name,booking:'Your booking',address:m.address?'Edit your address':'A place to call home',notifications:'Your neighbourhood updates','register-provider':'Your next chapter starts here.','edit-service':m.service?'Edit service':'Add a service',confirm:m.heading,quote:'A clear quote. A good start.',chat:'A little conversation',review:'How did it go?',assign:'The right person for the job','resolve-ticket':'Review support request',about:'Your neighbourhood. Your trusted helpers.',faq:'A few things you might be wondering.','provider-detail':m.provider?.business_name||m.provider?.name,policy:{terms:'Terms of service',privacy:'Your privacy matters',cancellation:'Cancellations & refunds'}[m.policy]}[m.type]||'Local Mate';
- return <div className="modal-backdrop" onMouseDown={e=>{if(e.target===e.currentTarget)close()}}><section className={'modal modal-'+m.type} role="dialog" aria-modal="true" aria-label={heading} ref={ref} tabIndex={-1}><button className="modal-close" onClick={close} aria-label="Close dialog"><X size={21}/></button><div className="modal-eyebrow"><House size={15}/> LOCAL MATE</div><h2>{heading}</h2>
- {m.type==='edit-provider'?<ProviderEditor admin provider={m.provider} api={api} {...ctx} close={close}/>:m.type==='service-roster'?<ServiceRoster service={m.service} api={api} {...ctx}/>:m.type==='signin'?<SignIn notify={notify} reload={reload} close={close} go={ctx.go} registrationEnabled={ctx.website?.registration_enabled!==false}/>
- :m.type==='location'?<><p>Starting close to home. Select the town where you need a hand.</p><div className="locations">{locations.length===0&&<p className="muted-copy">No service areas are currently active.</p>}{locations.map(l=><button key={l} className={l===location?'selected':''} onClick={()=>{setLocation(l);close();notify('Your neighbourhood is now '+l+'.')}}><MapPin size={19}/><span>{l}<small>Kerala, India</small></span>{l===location?<CheckCircle2 size={19}/>:<ChevronRight size={16}/>}</button>)}</div><small className="muted-copy">Availability depends on approved professionals in your selected area.</small></>
- :m.type==='service'?<ServiceBooking service={m.service} {...ctx} close={close}/>
- :m.type==='booking'?<BookingDetails id={m.id} role={m.role} {...ctx} close={close}/>
- :m.type==='chat'?<Chat id={m.id} {...ctx}/>
- :m.type==='address'?<SavedPlaceForm address={m.address} api={api} {...ctx} close={close}/>
- :m.type==='notifications'?<Notifications {...ctx}/>
- :m.type==='register-provider'?<ProviderApplication {...ctx} close={close}/>
- :m.type==='edit-service'?<Form onSubmit={async d=>{await api('/admin/services',{...d,id:m.service?.id,active:d.active==='on',price:Number(d.price)});reload();notify('Service saved.');close()}}><div className="form-grid"><Field label="Service name"><input name="name" defaultValue={m.service?.name} required maxLength={100}/></Field><Field label="Category"><input name="category" defaultValue={m.service?.category||'Home care'} list="service-category-options" required maxLength={100}/><datalist id="service-category-options">{[...new Set([...categories,...catalog.map(s=>s.category)])].map(c=><option key={c} value={c}/>)}</datalist></Field></div><Field label="Description"><textarea name="description" defaultValue={m.service?.description} required maxLength={1000} rows={3}/></Field><div className="form-grid"><Field label="Booking type"><select name="type" defaultValue={m.service?.type||'fixed'}>{['fixed','quote','transport','goods','rental','emergency'].map(t=><option value={t} key={t}>{title(t)}</option>)}</select></Field><Field label="Starting estimate (₹)"><input name="price" type="number" min="0" step="1" defaultValue={m.service?.price||0} required/></Field></div><label className="checkbox-row"><input name="active" type="checkbox" defaultChecked={m.service?!!m.service.active:true}/>Active and visible</label></Form>
- :m.type==='confirm'?<><p>{m.description}</p><Form submit="Confirm" onSubmit={async()=>{await m.action();close()}}/></>
- :m.type==='quote'?<Form submit="Send quotation" onSubmit={async d=>{await api('/bookings/'+m.id+'/quote',{labour:Number(d.labour),materials:Number(d.materials),additional:Number(d.additional),terms:d.terms});reload();notify('Quotation sent for customer approval.');close()}}><p>Work is confirmed only after the customer approves your quote.</p><div className="form-grid"><Field label="Labour (₹)"><input type="number" name="labour" min="0" step="1" required/></Field><Field label="Materials (₹)"><input type="number" name="materials" min="0" step="1" defaultValue="0" required/></Field><Field label="Other charges (₹)"><input type="number" name="additional" min="0" step="1" defaultValue="0" required/></Field></div><Field label="Time estimate, scope & terms"><textarea name="terms" required rows={4} maxLength={2000}/></Field></Form>
- :m.type==='review'?<Form submit="Share your review" onSubmit={async d=>{await api('/bookings/'+m.id+'/review',{rating:Number(d.rating),body:d.body});reload();notify('Thank you. Your verified booking review has been saved.');close()}}><Field label="Your rating"><select name="rating">{[5,4,3,2,1].map(n=><option value={n} key={n}>{'★'.repeat(n)} · {n} stars</option>)}</select></Field><Field label="Tell your neighbours a little more"><textarea name="body" required maxLength={2000} rows={4}/></Field></Form>
- :m.type==='assign'?<Form submit="Assign provider" onSubmit={async d=>{await api('/admin/assign',{booking_id:m.booking.id,provider_id:d.provider_id});reload();notify('Booking assigned.');close()}}><p>{m.booking.service_name} · {m.booking.location}</p><Field label="Approved professional"><select name="provider_id" required defaultValue=""><option value="" disabled>Choose a matching provider</option>{providers.filter(p=>p.online&&array(p.service_ids).includes(m.booking.service_id)&&array(p.locations).includes(m.booking.location)).map(p=><option key={p.user_id} value={p.user_id}>{p.business_name||p.name}</option>)}</select></Field><small className="muted-copy">Only online, approved providers serving this service and area are listed.</small></Form>
- :m.type==='resolve-ticket'?<Form submit="Save response" onSubmit={async d=>{await api('/admin/support',{...d,id:m.ticket.id});reload();notify('Support ticket updated.');close()}}><p>{m.ticket.body}</p><Field label="Status"><select name="status" defaultValue={m.ticket.status}>{['open','under_review','resolved','closed'].map(t=><option value={t} key={t}>{title(t)}</option>)}</select></Field><Field label="Response / resolution"><textarea name="resolution" defaultValue={m.ticket.resolution} rows={4} required maxLength={4000}/></Field></Form>
- :m.type==='provider-detail'?<><div className="provider-profile-header"><span className="provider-avatar">{m.provider.name[0]}</span><div><Status value="approved"/><p>{m.provider.category} · {m.provider.experience} years of experience</p></div></div><p>{m.provider.description}</p><ProviderRates provider={m.provider} catalog={catalog}/><h3>Around your corner</h3><p>{array(m.provider.locations).join(', ')}</p><h3>A helping hand with</h3><div className="pill-list">{array(m.provider.service_ids).map(id=><button key={id} onClick={()=>{const s=catalog.find(s=>s.id===id);if(s)open({type:'service',service:s})}}>{catalog.find(s=>s.id===id)?.name||id}<ArrowUpRight size={13}/></button>)}</div><small className="muted-copy">Select a service to choose a provider and view their rate. Your request is confirmed after acceptance or quotation approval.</small></>
- :m.type==='about'&&site.about_text?<p style={{whiteSpace:'pre-wrap'}}>{site.about_text}</p>:m.type==='about'?<><p>Some days, we all need a helping hand. Local Mate brings everyday services and local skills together in one simple place.</p><p>We’re starting in Pattambi and nearby towns in Kerala. Our aim is simple: make it easier to find help, and easier for good local professionals to find work.</p><div className="notice"><Leaf size={24}/><span>Rooted in our neighbourhood. Growing together.</span></div><Button onClick={()=>{close();ctx.go('services')}}>Explore your neighbourhood <ArrowRight size={16}/></Button></>
- :m.type==='faq'&&site.faq_text?<p style={{whiteSpace:'pre-wrap'}}>{site.faq_text}</p>:m.type==='faq'?<div className="faqs">{[['Where is Local Mate available?','We’re starting with Pattambi, Ottapalam, Thrithala, Shoranur, Cherpulassery and Perinthalmanna. Booking availability depends on approved professionals in each area.'],['How are service prices decided?','Listed prices are starting estimates. Your provider confirms the final quote before work begins. Projects such as painting and carpentry require your approval of a written quotation.'],['Can I book a particular professional?','Yes. Open a service, compare providers and choose an available professional. If they decline, the request opens to other eligible providers. Confirmation requires acceptance or your approval of a quotation.'],['How do I pay?','Pay after service is the current booking preference. Online payments need a configured payment gateway and verified server confirmation.'],['How do I change or cancel a booking?','Open My bookings, select your booking, and choose reschedule or cancel before work starts. Contact support after work has started.'],['Is emergency help guaranteed?','No. Requests depend on a suitable provider confirming availability. For urgent threats to life or safety, contact the appropriate emergency service.'],['Can I join as a service provider?','Yes. Sign in, add your contact details and apply through Become a pro. Applications must be reviewed before providers receive requests.']].map(([q,a])=><details key={q}><summary>{q}<ChevronDown size={16}/></summary><p>{a}</p></details>)}</div>
- :m.type==='policy'?<Policy type={m.policy} content={site}/>:null}</section></div>
+function Field({ label, children, hint }) {
+  return (
+    <label className="field">
+      <span>{label}</span>
+      {React.Children.map(children, (child) =>
+        React.isValidElement(child) &&
+        ["input", "select", "textarea"].includes(child.type)
+          ? React.cloneElement(child, {
+              "aria-label": child.props["aria-label"] || label,
+            })
+          : child,
+      )}
+      {hint && <small>{hint}</small>}
+    </label>
+  );
 }
-function ServiceBooking({service:s,me,open,location,notify,reload,close,providers}){const [mode,setMode]=useState('detail'),[addresses,setAddresses]=useState([]),[selected,setSelected]=useState(''),[point,setPoint]=useState(null);const [idem]=useState(()=>crypto.randomUUID());useEffect(()=>{if(me)api('/addresses').then(setAddresses).catch(()=>{})},[me]);const available=providers.filter(p=>p.online&&array(p.service_ids).includes(s.id)&&array(p.locations).includes(location));return <><div className={'service-detail-image '+s.tone}>{['cleaning','plumbing','electrical','ac','painting','carpentry'].includes(s.id)?<img src={'/assets/'+s.id+'.png'} alt=""/>:<span>{s.icon}</span>}<div><span>{s.category}</span><strong>{s.price?rupees(s.price):'Your project. Your quote.'}</strong><small>{s.price?'Starting estimate · Final price confirmed before work':'Get a personalised quote before work begins'}</small></div></div><p>{s.description}</p><ServiceProviders me={me} providers={providers} service={s} location={location} selected={selected} onSelect={setSelected}/>{selected&&<button className="text-link" type="button" onClick={()=>setSelected('')}>Let any available provider respond instead</button>}{mode==='detail'?<><div className="detail-features"><span><ShieldCheck size={18}/>Approval before assignment</span><span><CalendarDays size={18}/>A time that suits you</span><span><MessageSquare size={18}/>Booking-linked conversations</span></div><div className="availability-note"><MapPin size={16}/>{available.length?available.length+' approved professionals online in '+location:'We’re welcoming professionals in '+location+'. Booking opens when a suitable provider is available.'}</div>{s.type==='emergency'&&<p className="form-error">Availability must be confirmed. This is not a guaranteed emergency response service.</p>}<Button className="full-width" disabled={!!me&&!available.length} onClick={()=>me?setMode('form'):open({type:'signin'})}>{s.type==='quote'?'Tell us about your project':'Plan your service'} <ArrowRight size={17}/></Button><small className="center muted-copy">No payment required to send a request.</small></>:<Form submit={s.type==='quote'?'Request a quotation':'Send booking request'} onSubmit={async d=>{await api('/bookings',{service_id:s.id,provider_id:selected||undefined,latitude:d.latitude,longitude:d.longitude,destination_latitude:d.destination_latitude,destination_longitude:d.destination_longitude,location,address:d.address,scheduled_at:new Date(d.date+'T'+d.time+':00+05:30').toISOString(),description:d.description,payment_method:'cash',idempotency_key:idem,details:{destination:d.destination,passengers:d.passengers,vehicle:d.vehicle,goods:d.goods,weight:d.weight,loading:d.loading,end_date:d.end_date?d.end_date+'T23:59:00+05:30':undefined,quantity:d.quantity,delivery:d.delivery,measurements:d.measurements,contact:d.contact}});reload();notify('Your request has been created. We’ll update you when a provider responds.');close()}}>
- {addresses.length>0&&<Field label="Use a saved address"><select defaultValue="" onChange={e=>{const a=addresses.find(a=>a.id===e.target.value);e.target.form.elements.address.value=a?.address||'';setPoint(a?.latitude!=null?{latitude:a.latitude,longitude:a.longitude}:null)}}><option value="">Choose a saved place</option>{addresses.filter(a=>a.location===location).map(a=><option key={a.id} value={a.id}>{a.label} · {a.location}</option>)}</select></Field>}
- <Field label={['transport','goods'].includes(s.type)?'Pickup address':'Service address'}><textarea name="address" placeholder="House name, street, landmark & PIN code" rows={2} required maxLength={1000}/></Field><small className="muted-copy">Service area: {location}, Kerala</small><PlacePicker value={point} onChange={setPoint} label="Exact service / pickup place (optional)"/>
- {['transport','goods'].includes(s.type)&&<><Field label="Destination"><textarea name="destination" required rows={2} maxLength={1000}/></Field><PlacePicker prefix="destination_" label="Exact destination (optional)"/><div className="form-grid"><Field label="Vehicle preference"><select name="vehicle"><option>Any suitable vehicle</option><option>Auto rickshaw</option><option>Taxi</option><option>Pickup van</option><option>Mini lorry</option></select></Field>{s.type==='transport'&&<Field label="Passengers / items"><input name="passengers" type="number" min="1" max="30" defaultValue="1"/></Field>}</div></>}
- {s.type==='goods'&&<div className="form-grid"><Field label="Goods description"><input name="goods" required maxLength={300}/></Field><Field label="Approximate weight / size"><input name="weight" required placeholder="e.g. 200 kg, 4 boxes" maxLength={100}/></Field><Field label="Loading & unloading"><select name="loading"><option>Not required</option><option>Loading only</option><option>Loading and unloading</option></select></Field></div>}
- <div className="form-grid"><Field label={s.type==='rental'?'Rental start date':'Preferred date'}><input name="date" type="date" min={new Date().toLocaleDateString('en-CA',{timeZone:'Asia/Kolkata'})} required/></Field><Field label="Preferred time (IST)"><input name="time" type="time" required defaultValue="10:00"/></Field></div>
- {s.type==='rental'&&<div className="form-grid"><Field label="Rental end date"><input name="end_date" type="date" required/></Field><Field label="Quantity"><input type="number" name="quantity" min="1" max="100" defaultValue="1" required/></Field><Field label="Delivery required?"><select name="delivery"><option>Yes, please deliver</option><option>No, I will collect</option></select></Field></div>}
- {s.type==='quote'&&<Field label="Measurements / project size (optional)"><input name="measurements" placeholder="e.g. 2 rooms, 800 sq ft" maxLength={300}/></Field>}
- {s.type==='emergency'&&<Field label="Contact mobile"><input type="tel" name="contact" placeholder="+919876543210" required pattern="(\+91)?[6-9][0-9]{9}"/></Field>}
- <Field label={s.type==='quote'?'Tell us about your project':'What needs a helping hand?'}><textarea name="description" required rows={3} maxLength={4000} placeholder="A few details help us find the right person."/></Field><div className="payment-choice"><Wallet size={21}/><div><strong>Pay after service</strong><small>Agree on the final amount with your provider.</small></div><CheckCircle2 size={19}/></div><small className="muted-copy">Photos and documents can be shared through support once secure storage is configured. No payment is collected at this step.</small></Form>}</>}
-function ProviderApplication({me,catalog,location,notify,reload,close,go,locations=defaultLocations}){const [selected,setSelected]=useState([]),[areas,setAreas]=useState([location]);if(!me.phone)return <><p>First, add your name and Indian mobile number to your profile. Your contact details are private.</p><Button onClick={()=>{close();go('profile')}}>Complete my profile <ArrowRight size={17}/></Button></>;return <><p>Tell us what you do best. Your application is reviewed before you receive bookings.</p><Form submit="Submit for review" onSubmit={async d=>{await api('/provider/register',{...d,service_ids:selected,locations:areas,experience:Number(d.experience)});reload();notify('Your provider application has been submitted for review.');close()}}><div className="form-grid"><Field label="Business name (optional)"><input name="business_name" maxLength={100}/></Field><Field label="Years of experience"><input type="number" name="experience" min="0" max="70" required defaultValue="0"/></Field></div><Field label="Primary category"><select name="category">{categories.map(c=><option key={c}>{c}</option>)}</select></Field><fieldset><legend>Your services</legend><div className="checkbox-grid">{catalog.map(s=><label key={s.id}><input type="checkbox" checked={selected.includes(s.id)} onChange={e=>setSelected(e.target.checked?[...selected,s.id]:selected.filter(x=>x!==s.id))}/>{s.name}</label>)}</div></fieldset><fieldset><legend>Where you work</legend><div className="checkbox-grid">{locations.map(l=><label key={l}><input type="checkbox" checked={areas.includes(l)} onChange={e=>setAreas(e.target.checked?[...areas,l]:areas.filter(x=>x!==l))}/>{l}</label>)}</div></fieldset><Field label="Your skills, qualifications & experience"><textarea name="description" required rows={4} maxLength={2000} placeholder="Tell your neighbourhood a little about your work."/></Field><p className="muted-copy">Identity and relevant qualifications must be reviewed separately before approval. Please do not enter bank details or identity document numbers here.</p></Form></>}
-function BookingDetails({id,role,me,refresh,reload,notify,open}){const [b,setB]=useState(null),[error,setError]=useState(''),[reschedule,setReschedule]=useState(false);useEffect(()=>{let alive=true;const load=()=>api('/bookings/'+id).then(d=>{if(alive)setB(d)}).catch(e=>{if(alive)setError(e.message)});load();const timer=setInterval(load,10000);return()=>{alive=false;clearInterval(timer)}},[id,refresh]);const action=async(path,data={})=>{try{await api('/bookings/'+id+'/'+path,data);reload();notify('Your booking has been updated.')}catch(e){setError(e.message)}};if(!b)return error?<p className="form-error">{error}</p>:<Loading/>;const customer=b.customer_id===me.id,assigned=b.provider_id===me.id,candidate=role==='provider'&&!b.provider_id;const latest=b.quotes.find(q=>q.status==='pending');return <><div className="booking-detail-heading"><div><h3>{b.service_name}</h3><small>Reference {b.id.slice(0,8).toUpperCase()}</small></div><Status value={b.status}/></div>{error&&<p className="form-error">{error}</p>}<div className="detail-grid"><span><CalendarDays size={16}/>When<strong>{date(b.scheduled_at)}</strong></span><span><MapPin size={16}/>Where<strong>{b.address}, {b.location}</strong></span><span><Wallet size={16}/>Estimate<strong>{b.requires_quote&&['requested','quote_sent'].includes(b.status)?'Awaiting total quotation':b.estimated_price?rupees(b.estimated_price):'Awaiting quote'}</strong></span><span><CheckCircle2 size={16}/>Payment<strong>{title(b.payment_status)} · {title(b.payment_method)}</strong></span></div><div className="booking-description"><h3>A little about the job</h3><p>{b.description}</p>{Object.entries(readRecord(b.details)).filter(([k,v])=>v).map(([k,v])=><p key={k}><strong>{title(k)}: </strong>{typeof v==='object'?JSON.stringify(v):String(v)}</p>)}</div>{latest&&<div className="quote-card"><h3>A quote for your consideration</h3><div><span>Labour</span><strong>{rupees(latest.labour)}</strong></div><div><span>Materials</span><strong>{rupees(latest.materials)}</strong></div><div><span>Other charges</span><strong>{rupees(latest.additional)}</strong></div><div className="quote-total"><span>Total</span><strong>{rupees(latest.labour+latest.materials+latest.additional)}</strong></div><p>{latest.terms}</p>{customer&&<div className="actions"><Button onClick={()=>action('quote-response',{quote_id:latest.id,accept:true})}>Approve quotation <Check size={16}/></Button><Button secondary onClick={()=>action('quote-response',{quote_id:latest.id,accept:false})}>Decline</Button></div>}</div>}
- <div className="actions booking-actions">{candidate&&<>{b.service_type!=='quote'&&!b.requires_quote&&<Button onClick={()=>action('accept')}>Accept request <Check size={16}/></Button>}<Button secondary onClick={()=>open({type:'quote',id})}>Send quotation</Button><button className="danger-link" onClick={()=>action('reject')}>Decline request</button></>}{assigned&&['requested','confirmed'].includes(b.status)&&<Button secondary onClick={()=>open({type:'quote',id})}>Send quotation</Button>}{assigned&&(workflow[b.status]||[]).filter(s=>!['cancelled','disputed','quote_sent','confirmed'].includes(s)).map(s=><Button key={s} onClick={()=>action('status',{status:s})}>{title(s)} <ArrowRight size={16}/></Button>)}{(b.provider_id&&(customer||assigned)||role==='admin')&&<Button secondary onClick={()=>open({type:'chat',id})}><MessageSquare size={17}/>Messages</Button>}{customer&&['requested','confirmed'].includes(b.status)&&<Button secondary onClick={()=>setReschedule(!reschedule)}><CalendarDays size={17}/>Reschedule</Button>}{customer&&b.status==='work_completed'&&<Button secondary onClick={()=>open({type:'review',id})}><Star size={17}/>Leave a review</Button>}{customer&&b.status==='work_completed'&&<Button secondary onClick={async()=>{const data=await api('/bookings/'+id+'/invoice');const a=document.createElement('a'),url=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));a.href=url;a.download='local-mate-summary-'+id.slice(0,8)+'.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),5000)}}><Download size={17}/>Service summary</Button>}</div>
- {reschedule&&<Form submit="Confirm new time" onSubmit={async d=>{await api('/bookings/'+id+'/reschedule',{scheduled_at:new Date(d.date+'T'+d.time+':00+05:30').toISOString()});setReschedule(false);reload();notify('Booking rescheduled.')}}><div className="form-grid"><Field label="New date"><input type="date" name="date" required/></Field><Field label="New time (IST)"><input type="time" name="time" required/></Field></div></Form>}
- {(customer||assigned||role==='admin')&&<><BookingContact booking={b} me={me} api={api} open={open}/><BookingTracking booking={b} me={me} api={api}/></>}<h3 className="mt">Every step, in the loop.</h3><div className="timeline">{b.history.map((h,i)=><div key={i}><span/><div><strong>{title(h.status)}</strong><small>{date(h.created_at)}</small>{h.note&&<p>{h.note}</p>}</div></div>)}</div>
- {customer&&['requested','quote_sent','confirmed','on_the_way','arrived'].includes(b.status)&&<button className="danger-link" onClick={()=>open({type:'confirm',heading:'Cancel this booking?',description:'The provider will receive an in-app notification. Contact support for any payment or refund questions.',action:async()=>{await api('/bookings/'+id+'/status',{status:'cancelled'});reload();notify('Booking cancelled.')}})}>Cancel booking</button>}{customer&&['work_started','work_completed'].includes(b.status)&&<Button secondary onClick={()=>action('status',{status:'disputed'})}>Report a problem</Button>}</>}
-function Chat({id,me}){const [messages,setMessages]=useState([]),[error,setError]=useState(''),[body,setBody]=useState(''),[busy,setBusy]=useState(false),end=React.useRef(null);const load=()=>api('/bookings/'+id+'/messages').then(setMessages).catch(e=>setError(e.message));useEffect(()=>{load();const timer=setInterval(load,10000);const client=getBrowserClient();const channel=client?.channel('booking-'+id).on('postgres_changes',{event:'INSERT',schema:'public',table:'messages',filter:'booking_id=eq.'+id},load).subscribe();return()=>{clearInterval(timer);if(channel)client.removeChannel(channel)}},[id]);useEffect(()=>{end.current?.scrollIntoView({behavior:'smooth',block:'nearest'})},[messages.length]);return <><p className="muted-copy">Private conversation for booking {id.slice(0,8).toUpperCase()}. Realtime updates with a 10-second refresh fallback.</p>{error&&<p className="form-error">{error}</p>}<div className="chat-messages">{messages.length?messages.map(m=><div className={'chat-message '+(m.sender_id===me.id?'mine':'')} key={m.id}><small>{m.sender_name}</small><p>{m.body}</p><time>{date(m.created_at)}</time></div>):<Empty icon={MessageSquare} title="Say a little hello">Start a conversation about the job. Please keep sensitive details private.</Empty>}<div ref={end}/></div><form className="chat-compose" onSubmit={async e=>{e.preventDefault();if(!body.trim())return;setBusy(true);try{await api('/bookings/'+id+'/messages',{body});setBody('');load()}catch(e){setError(e.message)}finally{setBusy(false)}}}><input value={body} onChange={e=>setBody(e.target.value)} placeholder="Write a message…" aria-label="Message" required maxLength={4000}/><button disabled={busy} aria-label="Send message"><Send size={19}/></button></form></>}
-function Notifications({notify}){const [items,setItems]=useState(null),[error,setError]=useState('');useEffect(()=>{api('/notifications').then(setItems).catch(e=>setError(e.message))},[]);return <>{error?<p className="form-error">{error}</p>:!items?<Loading/>:items.length?<><button className="text-link" onClick={async()=>{await api('/notifications',{});setItems(items.map(n=>({...n,is_read:1})));notify('All updates marked as read.')}}>Mark all as read <Check size={14}/></button>{items.map(n=><div className={'notification '+(!n.is_read?'unread':'')} key={n.id}><Bell size={19}/><div><strong>{n.title}</strong><small>{date(n.created_at)}</small></div></div>)}</>:<Empty icon={Bell} title="All quiet in your corner">Booking updates and new messages will appear here.</Empty>}</>}
-function Policy({type,content={}}){if(content[type+'_text'])return <div className="policy"><p style={{whiteSpace:'pre-wrap'}}>{content[type+'_text']}</p></div>;return <div className="policy">{type==='privacy'?<><p>Local Mate collects your account username and profile details, the contact details you choose to add, booking information, addresses, messages, and support requests needed to coordinate services.</p><h3>Who can see your information</h3><p>Customers access their own records. Assigned providers access the details needed for their jobs. Authorized administrators can review relevant records to operate the marketplace and resolve disputes. Provider numbers are published only when the provider consents. Booking participants can access contact details needed for coordination.</p><h3>Payments and location</h3><p>Card information is never stored by Local Mate. Online payment processing requires an authorized gateway. Providers can choose to share GPS for an assigned active job while its booking page is open. Sharing stops on leaving or hiding the page, finishing the job or choosing Stop. Only the booking customer, assigned provider and authorized administrators can view recent positions; updates older than two minutes are hidden. The latest position replaces the previous one and is deleted when sharing stops or the job ends. Map tiles are served by OpenStreetMap.</p><h3>Your choices</h3><p>You can edit contact details and saved addresses in your account. Contact support for account or data requests.</p></>:type==='cancellation'?<><p>You can cancel a requested or confirmed booking before work begins from My bookings. You can also reschedule a requested or confirmed booking for a future time.</p><p>Once work has begun, contact support to review cancellation, completed work and any agreed costs. No cancellation fee is collected automatically by this version.</p><h3>Refund requests</h3><p>Raise a support ticket referencing your booking. Refunds are reviewed against the actual payment record and agreed service terms. A refund is not confirmed until processed through the payment provider or reconciled by support.</p></>:<><p>Local Mate helps customers request services from local professionals. Availability is confirmed only when an approved provider accepts a request or an administrator assigns it.</p><h3>Bookings and quotations</h3><p>Starting prices are estimates. Quotation-based jobs require customer approval before work is confirmed. Additional charges must be agreed before the related work begins.</p><h3>Your responsibilities</h3><p>Provide accurate details, safe access and respectful communication. Providers must have appropriate qualifications, permissions and insurance for the work they offer.</p><h3>Emergency services</h3><p>Local Mate does not guarantee emergency response. For immediate danger, contact the appropriate emergency authority.</p></>}<div className="notice"><AlertCircle size={20}/><small>Launch policy draft. The business owner must finalize legal identity, contact details, retention periods and applicable terms before public commercial launch.</small></div></div>}
+function Form({
+  onSubmit,
+  children,
+  submit = "Save changes",
+  disabled = false,
+}) {
+  const [busy, setBusy] = useState(false),
+    [error, setError] = useState(""),
+    submitting = React.useRef(false);
+  return (
+    <form
+      onSubmit={async (e) => {
+        e.preventDefault();
+        if (disabled || submitting.current) return;
+        submitting.current = true;
+        setError("");
+        setBusy(true);
+        try {
+          await onSubmit(Object.fromEntries(new FormData(e.currentTarget)));
+        } catch (e) {
+          setError(e.message);
+        } finally {
+          submitting.current = false;
+          setBusy(false);
+        }
+      }}
+    >
+      {children}
+      {error && (
+        <div className="form-error" role="alert">
+          <AlertCircle size={17} />
+          {error}
+        </div>
+      )}
+      <Button disabled={busy || disabled} type="submit" className="form-submit">
+        {busy ? <LoaderCircle className="spin" size={18} /> : submit}
+        <ArrowRight size={17} />
+      </Button>
+    </form>
+  );
+}
+export default function App({ initialPage = "home" }) {
+  const [website, setWebsite] = useState({
+      content: {},
+      customer_portal_enabled: true,
+      provider_portal_enabled: true,
+      registration_enabled: true,
+      bookings_enabled: true,
+    }),
+    [towns, setTowns] = useState(defaultLocations);
+  const site = website.content || {};
+  const [page, setPage] = useState(initialPage),
+    [catalog, setCatalog] = useState(defaults),
+    [providers, setProviders] = useState([]),
+    [me, setMe] = useState(null),
+    [location, setLocation] = useState("Pattambi"),
+    [category, setCategory] = useState("Home care"),
+    [query, setQuery] = useState(""),
+    [modal, setModal] = useState(null),
+    [toast, setToast] = useState(""),
+    [mobile, setMobile] = useState(false),
+    [lang, setLang] = useState("en"),
+    [refresh, setRefresh] = useState(0),
+    [configured, setConfigured] = useState(false);
+  const notify = useCallback((msg) => {
+    setToast(msg);
+    setTimeout(() => setToast(""), 5000);
+  }, []);
+  const reload = () => setRefresh((x) => x + 1);
+  useEffect(() => {
+    const saved = localStorage.getItem("lm-location");
+    if (saved) setLocation(saved);
+  }, []);
+  useEffect(() => {
+    api("/website")
+      .then(setWebsite)
+      .catch(() => {});
+    api("/catalog")
+      .then((d) => {
+        setCatalog(d.services);
+        setConfigured(d.configured);
+        if (Array.isArray(d.locations)) setTowns(d.locations);
+      })
+      .catch(() => {});
+    api("/providers")
+      .then(setProviders)
+      .catch(() => {});
+    api("/me")
+      .then(setMe)
+      .catch(() => setMe(null));
+  }, [refresh]);
+  const go = (p) => {
+    setPage(p);
+    setMobile(false);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+  const open = (m) => setModal(m);
+  const requireUser = (fn) => (me ? fn() : open({ type: "signin" }));
+  const serviceCategories = [
+    ...new Set([...categories, ...catalog.map((s) => s.category)]),
+  ];
+  const filtered = catalog.filter(
+    (s) =>
+      (page === "services"
+        ? category === "All services" || s.category === category
+        : s.category === category) &&
+      (!query ||
+        (s.name + " " + s.description + " " + s.category)
+          .toLowerCase()
+          .includes(query.toLowerCase())),
+  );
+  const search = (e) => {
+    e?.preventDefault();
+    setCategory("All services");
+    go("services");
+  };
+  const context = {
+    me,
+    notify,
+    reload,
+    refresh,
+    go,
+    open,
+    requireUser,
+    catalog,
+    providers,
+    location,
+    configured,
+    website,
+    locations: towns,
+  };
+  return (
+    <VoiceProvider
+      me={me}
+      api={api}
+      openChat={(id) => open({ type: "chat", id })}
+    >
+      <div className="announcement">
+        <span className="live-dot" />{" "}
+        {site.announcement || "A little help, right around the corner."}{" "}
+        <span className="announcement-extra">
+          Now growing in Pattambi, Kerala.
+        </span>
+        <button onClick={() => open({ type: "location" })}>
+          Explore your neighbourhood <ArrowRight size={13} />
+        </button>
+      </div>
+      <header>
+        <div className="nav-shell">
+          <button
+            className="brand"
+            onClick={() => go("home")}
+            aria-label="Local Mate home"
+          >
+            <span className="brand-mark">
+              <House size={25} strokeWidth={2.7} />
+            </span>
+            <span>
+              {site.site_name && site.site_name !== "Local Mate" ? (
+                site.site_name
+              ) : (
+                <>
+                  local<span className="brand-mate">mate</span>
+                </>
+              )}
+              <i />
+            </span>
+          </button>
+          <nav className={mobile ? "open" : ""}>
+            {[
+              ["home", "Home"],
+              ["services", "Services"],
+              ["how", "How it works"],
+            ].map(([key, label]) => (
+              <button
+                className={page === key ? "active" : ""}
+                onClick={() => {
+                  if (key === "services") setCategory("All services");
+                  go(key);
+                }}
+                key={key}
+              >
+                {lang === "ml"
+                  ? {
+                      Home: "ഹോം",
+                      Services: "സേവനങ്ങൾ",
+                      "How it works": "എങ്ങനെ പ്രവർത്തിക്കുന്നു",
+                    }[label]
+                  : label}
+              </button>
+            ))}
+            <button onClick={() => go("provider")}>
+              Become a pro <ArrowUpRight size={13} />
+            </button>
+          </nav>
+          <div className="nav-actions">
+            <button
+              className="location-button"
+              onClick={() => open({ type: "location" })}
+            >
+              <MapPin size={17} />
+              <span>{location}</span>
+              <ChevronDown size={13} />
+            </button>
+            <button
+              className="language-button"
+              aria-label="Switch language"
+              onClick={() => {
+                setLang(lang === "en" ? "ml" : "en");
+                notify(
+                  lang === "en"
+                    ? "മലയാളം നാവിഗേഷൻ തിരഞ്ഞെടുത്തു. കൂടുതൽ വിവർത്തനങ്ങൾ ഉടൻ."
+                    : "English navigation selected.",
+                );
+              }}
+            >
+              {lang === "en" ? "മ" : "EN"}
+            </button>
+            {me ? (
+              <>
+                <button
+                  className="notification-button"
+                  aria-label="Notifications"
+                  onClick={() => open({ type: "notifications" })}
+                >
+                  <Bell size={20} />
+                </button>
+                <button
+                  className="avatar"
+                  onClick={() => go("bookings")}
+                  aria-label="Your account"
+                >
+                  {me.name?.[0]?.toUpperCase() || "M"}
+                </button>
+              </>
+            ) : (
+              <Button onClick={() => open({ type: "signin" })}>
+                Log in <ArrowRight size={15} />
+              </Button>
+            )}
+            <button
+              className="mobile-toggle"
+              onClick={() => setMobile(!mobile)}
+              aria-label="Toggle navigation"
+            >
+              {mobile ? <X /> : <Menu />}
+            </button>
+          </div>
+        </div>
+      </header>
+      <main>
+        {me?.must_change_password ? (
+          <section className="section-shell content-page">
+            <div className="eyebrow muted">FINISH ACCOUNT SETUP</div>
+            <h1>Make this account yours.</h1>
+            <CredentialsPanel
+              me={me}
+              api={api}
+              notify={notify}
+              reload={reload}
+              required
+            />
+          </section>
+        ) : website.maintenance_mode && !me?.admin ? (
+          <section className="section-shell content-page">
+            <h1>We’ll be back soon.</h1>
+            <p>
+              The website is temporarily paused. Administrators can sign in to
+              manage the site.
+            </p>
+            <Button onClick={() => open({ type: "signin" })}>
+              Administrator sign in
+            </Button>
+          </section>
+        ) : !me?.admin &&
+          (([
+            "bookings",
+            "profile",
+            "addresses",
+            "payments",
+            "messages",
+            "invoices",
+            "calls",
+          ].includes(page) &&
+            !website.customer_portal_enabled) ||
+            (page === "provider" && !website.provider_portal_enabled)) ? (
+          <section className="section-shell content-page">
+            <h1>This portal is temporarily paused.</h1>
+            <p>Please check back later or contact support.</p>
+          </section>
+        ) : page === "home" ? (
+          <>
+            <section className="hero section-shell">
+              <div className="hero-copy">
+                <div className="eyebrow">
+                  <span className="live-dot" /> YOUR NEIGHBOURHOOD, TAKEN CARE
+                  OF
+                </div>
+                <h1>
+                  {lang === "ml" ? (
+                    <>
+                      നിങ്ങളുടെ വീട്.
+                      <br />
+                      നമ്മുടെ ആളുകൾ.
+                      <br />
+                      <em>സഹായം അടുത്തുണ്ട്.</em>
+                    </>
+                  ) : (
+                    <>
+                      {site.hero_line_1 || "Your home."}
+                      <br />
+                      {site.hero_line_2 || "Our people."}
+                      <br />
+                      <em>{site.hero_line_3 || "Consider it done."}</em>
+                    </>
+                  )}
+                </h1>
+                <p>
+                  {site.hero_description ||
+                    "From a leaky tap to a fresh coat of paint. Find a trusted helping hand, close to home."}
+                </p>
+                <form className="hero-search" onSubmit={search}>
+                  <Search size={21} />
+                  <input
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    placeholder="What can we help you with?"
+                    aria-label="Search services"
+                  />
+                  <button aria-label="Find a service">
+                    <ArrowRight size={22} />
+                  </button>
+                </form>
+                <div className="popular-search">
+                  <span>Popular:</span>
+                  {["Cleaning", "Plumbing", "AC repair"].map((x) => (
+                    <button
+                      key={x}
+                      onClick={() => {
+                        setQuery(x === "AC repair" ? "AC" : x);
+                        setCategory("All services");
+                        go("services");
+                      }}
+                    >
+                      {x}
+                      <ArrowUpRight size={11} />
+                    </button>
+                  ))}
+                </div>
+                <div className="hero-proof">
+                  <span className="little-houses">
+                    <House size={15} />
+                    <Heart size={15} />
+                    <Check size={15} />
+                  </span>
+                  <span>Local skills. A little more peace of mind.</span>
+                </div>
+              </div>
+              <div className="hero-art">
+                <div className="art-label">
+                  <span />
+                  <span>GOOD HELP. RIGHT HERE.</span>
+                  <span />
+                </div>
+                <img
+                  className="house-art"
+                  src="/assets/house.svg"
+                  alt="A welcoming white home with a blue roof, surrounded by green trees"
+                />
+                <div className="floating-card verified-card">
+                  <span className="floating-icon">
+                    <ShieldCheck size={26} />
+                  </span>
+                  <div>
+                    <strong>Good hands. Great care.</strong>
+                    <small>Verified before your first booking</small>
+                  </div>
+                  <span className="tiny-check">
+                    <Check size={11} />
+                  </span>
+                </div>
+                <div className="floating-card price-card">
+                  <span className="rupee-icon">₹</span>
+                  <div>
+                    <strong>
+                      A fair price.
+                      <br />A clear promise.
+                    </strong>
+                    <small>Approve your quote first.</small>
+                  </div>
+                </div>
+                <div className="local-label">
+                  <span className="live-dot" />
+                  Rooted in Pattambi. Made for you.
+                </div>
+                <span className="art-spark spark-one">✦</span>
+                <span className="art-spark spark-two">✧</span>
+              </div>
+            </section>
+            <div className="trust-strip section-shell">
+              {[
+                [
+                  ShieldCheck,
+                  "Carefully verified",
+                  "People you can feel good about",
+                ],
+                [
+                  CalendarDays,
+                  "Fits your day",
+                  "Choose a time that works for you",
+                ],
+                [
+                  Wallet,
+                  "Upfront & transparent",
+                  "Know the price before we begin",
+                ],
+                [
+                  Headphones,
+                  "Here when you need us",
+                  "A local team, just a message away",
+                ],
+              ].map(([Icon, heading, desc]) => (
+                <div key={heading}>
+                  <Icon size={25} strokeWidth={1.7} />
+                  <span>
+                    <strong>{heading}</strong>
+                    <small>{desc}</small>
+                  </span>
+                </div>
+              ))}
+            </div>
+            <section className="services-section section-shell" id="services">
+              <div className="section-heading">
+                <div>
+                  <div className="eyebrow muted">
+                    A LITTLE HELP GOES A LONG WAY
+                  </div>
+                  <h2>What’s on your to-do list?</h2>
+                </div>
+                <button
+                  className="text-link"
+                  onClick={() => {
+                    setQuery("");
+                    setCategory("All services");
+                    go("services");
+                  }}
+                >
+                  Explore all services <ArrowRight size={17} />
+                </button>
+              </div>
+              <div className="category-tabs">
+                {serviceCategories.map((c, i) => (
+                  <button
+                    className={category === c ? "selected" : ""}
+                    onClick={() => {
+                      setCategory(c);
+                      setQuery("");
+                    }}
+                    key={c}
+                  >
+                    {
+                      [
+                        <House size={16} />,
+                        <Navigation size={16} />,
+                        <Building2 size={16} />,
+                        <Settings size={16} />,
+                        <BriefcaseBusiness size={16} />,
+                        <CalendarDays size={16} />,
+                        <Heart size={16} />,
+                      ][i]
+                    }
+                    {c}
+                  </button>
+                ))}
+              </div>
+              <div className="service-grid">
+                {filtered.slice(0, 6).map((s) => (
+                  <ServiceCard
+                    key={s.id}
+                    count={
+                      providers.filter(
+                        (p) =>
+                          array(p.service_ids).includes(s.id) &&
+                          array(p.locations).includes(location),
+                      ).length
+                    }
+                    service={s}
+                    onClick={() => open({ type: "service", service: s })}
+                  />
+                ))}
+              </div>
+              <div className="service-foot">
+                <ShieldCheck size={14} />
+                <span>
+                  Simple bookings. Clear estimates. No unexpected extras.
+                </span>
+                <small>Final price confirmed by your provider.</small>
+              </div>
+            </section>
+            <section className="how-section" id="how">
+              <div className="section-shell">
+                <div className="section-heading">
+                  <div>
+                    <div className="eyebrow muted">
+                      LESS TO DO. MORE LIFE TO LIVE.
+                    </div>
+                    <h2>A helping hand, in four easy steps.</h2>
+                  </div>
+                  <p>
+                    We take care of the little things.
+                    <br />
+                    So you can get back to your things.
+                  </p>
+                </div>
+                <div className="steps">
+                  {[
+                    [
+                      Search,
+                      "01",
+                      "Find your service",
+                      "Tell us what needs a little attention.",
+                    ],
+                    [
+                      CalendarDays,
+                      "02",
+                      "Make it your time",
+                      "Pick a date and a time that suit you.",
+                    ],
+                    [
+                      UserRound,
+                      "03",
+                      "Meet your local mate",
+                      "An approved professional accepts your request.",
+                    ],
+                    [
+                      CheckCircle2,
+                      "04",
+                      "Sit back. We’ve got this.",
+                      "Your job gets done. You get your day back.",
+                    ],
+                  ].map(([Icon, n, t, d]) => (
+                    <div className="step" key={n}>
+                      <div className="step-top">
+                        <span>
+                          <Icon size={25} />
+                        </span>
+                        <small>{n}</small>
+                      </div>
+                      <h3>{t}</h3>
+                      <p>{d}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </section>
+            <section className="neighbourhood section-shell">
+              <div>
+                <div className="eyebrow muted">LOCAL IS A LOVELY THING</div>
+                <h2>
+                  Your neighbours.
+                  <br />
+                  Your next helping hands.
+                </h2>
+                <p>
+                  Great work starts with people who know the place.
+                  <br />
+                  We’re bringing Pattambi’s local skills together,
+                  <br className="desktop" /> one trusted professional at a time.
+                </p>
+                <button className="text-link" onClick={() => go("providers")}>
+                  Meet the neighbourhood <ArrowRight size={17} />
+                </button>
+                <div className="towns">
+                  <MapPin size={15} />
+                  {location}, Kerala <span>•</span> Growing locally
+                </div>
+              </div>
+              <div className="join-card">
+                <div className="join-illustration">
+                  <span>🧰</span>
+                  <span className="join-badge">
+                    <Check size={16} />
+                  </span>
+                </div>
+                <div className="eyebrow">GOOD AT WHAT YOU DO?</div>
+                <h3>
+                  There’s a place
+                  <br />
+                  for you here.
+                </h3>
+                <p>
+                  Turn your skills into opportunities.
+                  <br />
+                  Work locally. Grow on your terms.
+                </p>
+                <Button onClick={() => go("provider")}>
+                  Become a Local Mate <ArrowRight size={17} />
+                </Button>
+                <small>
+                  No joining fee. Just your skills and a little heart.
+                </small>
+              </div>
+            </section>
+            <section className="bottom-banner section-shell">
+              <div className="banner-icon">
+                <House size={29} />
+                <Heart size={14} />
+              </div>
+              <div>
+                <h3>A happier home starts with a little help.</h3>
+                <p>
+                  {site.tagline || "Your neighbourhood. Your trusted helpers."}
+                </p>
+              </div>
+              <Button
+                onClick={() => {
+                  setCategory("All services");
+                  setQuery("");
+                  go("services");
+                }}
+              >
+                Find your helping hand <ArrowRight size={17} />
+              </Button>
+            </section>
+          </>
+        ) : page === "services" ? (
+          <section className="section-shell listing">
+            <div className="breadcrumb">
+              <button onClick={() => go("home")}>Home</button>
+              <ChevronRight size={13} />
+              Services
+            </div>
+            <div className="eyebrow muted">SOMETHING OFF YOUR LIST</div>
+            <h1>Good help, for everyday life.</h1>
+            <p className="subtitle">
+              Find the right service in {location}. One less thing to worry
+              about.
+            </p>
+            <form
+              className="listing-search"
+              onSubmit={(e) => e.preventDefault()}
+            >
+              <Search size={19} />
+              <input
+                placeholder="Search services…"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+              />
+              <button type="button" onClick={() => open({ type: "location" })}>
+                <MapPin size={16} />
+                {location}
+                <ChevronDown size={13} />
+              </button>
+            </form>
+            <div className="category-tabs">
+              {["All services", ...serviceCategories].map((c) => (
+                <button
+                  key={c}
+                  className={category === c ? "selected" : ""}
+                  onClick={() => setCategory(c)}
+                >
+                  {c}
+                </button>
+              ))}
+            </div>
+            <div className="list-count">
+              {filtered.length} services{" "}
+              <span>Estimates in INR · Final quote before work begins</span>
+            </div>
+            {filtered.length ? (
+              <div className="service-grid listing-grid">
+                {filtered.map((s) => (
+                  <ServiceCard
+                    count={
+                      providers.filter(
+                        (p) =>
+                          array(p.service_ids).includes(s.id) &&
+                          array(p.locations).includes(location),
+                      ).length
+                    }
+                    service={s}
+                    onClick={() => open({ type: "service", service: s })}
+                    key={s.id}
+                  />
+                ))}
+              </div>
+            ) : (
+              <Empty icon={Search} title="Let’s try another search">
+                No services match “{query}”. Try a different name or category.
+              </Empty>
+            )}
+          </section>
+        ) : page === "how" ? (
+          <section className="section-shell content-page">
+            <div className="eyebrow muted">A LITTLE LESS COMPLICATED</div>
+            <h1>From to-do to all done.</h1>
+            <p className="subtitle">
+              A simple way to find help in your neighbourhood.
+            </p>
+            <div className="steps vertical">
+              {[
+                [
+                  "Choose a service",
+                  "Browse local services and tell us what you need. Fixed services show a starting estimate; larger projects start with a quote.",
+                ],
+                [
+                  "Pick your place and time",
+                  "Add your address, preferred date and time, and a few details. We only accept bookings where an approved provider is available.",
+                ],
+                [
+                  "Confirm your helping hand",
+                  "A suitable provider accepts your request. For quotation-based work, you review and approve the quote before the job is confirmed.",
+                ],
+                [
+                  "Stay in the loop",
+                  "Message your provider and follow status updates from confirmation to completion. Pay after service and leave a review for a completed booking.",
+                ],
+              ].map(([t, d], i) => (
+                <div className="step" key={t}>
+                  <span className="step-number">0{i + 1}</span>
+                  <div>
+                    <h3>{t}</h3>
+                    <p>{d}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <Button
+              onClick={() => {
+                setCategory("All services");
+                go("services");
+              }}
+            >
+              Find a service <ArrowRight size={17} />
+            </Button>
+          </section>
+        ) : page === "providers" ? (
+          <ProviderDirectory {...context} />
+        ) : page === "provider" ? (
+          <ProviderPortal {...context} />
+        ) : page === "admin" ? (
+          <AdminPortal {...context} />
+        ) : page === "support" ? (
+          <Support {...context} />
+        ) : [
+            "bookings",
+            "profile",
+            "addresses",
+            "payments",
+            "messages",
+            "invoices",
+            "calls",
+          ].includes(page) ? (
+          <CustomerPortal {...context} tab={page} />
+        ) : null}
+      </main>
+      <footer className="section-shell">
+        <div className="footer-top">
+          <div>
+            <button className="brand" onClick={() => go("home")}>
+              <span className="brand-mark">
+                <House size={22} />
+              </span>
+              <span>
+                {site.site_name && site.site_name !== "Local Mate" ? (
+                  site.site_name
+                ) : (
+                  <>
+                    local<span className="brand-mate">mate</span>
+                  </>
+                )}
+                <i />
+              </span>
+            </button>
+            <p>{site.tagline || "Your neighbourhood. Your trusted helpers."}</p>
+            <span className="made-local">
+              <Heart size={13} /> Made for our neighbourhood.
+            </span>
+          </div>
+          <div>
+            <strong>Find a little help</strong>
+            <button
+              onClick={() => {
+                setCategory("All services");
+                go("services");
+              }}
+            >
+              All services
+            </button>
+            <button onClick={() => go("providers")}>Find a professional</button>
+            <button onClick={() => go("how")}>How it works</button>
+            <button onClick={() => go("bookings")}>My bookings</button>
+          </div>
+          <div>
+            <strong>Grow with us</strong>
+            <button onClick={() => go("provider")}>Become a Local Mate</button>
+            <button onClick={() => go("provider")}>Provider portal</button>
+            <button onClick={() => go("admin")}>Admin portal</button>
+            <button onClick={() => open({ type: "about" })}>
+              About Local Mate
+            </button>
+          </div>
+          <div>
+            <strong>We’re here to help</strong>
+            <button onClick={() => go("support")}>Help & support</button>
+            <button onClick={() => open({ type: "faq" })}>
+              Common questions
+            </button>
+            <button
+              onClick={() => open({ type: "policy", policy: "cancellation" })}
+            >
+              Cancellations & refunds
+            </button>
+            {site.contact_phone && (
+              <a
+                className="text-link"
+                href={"tel:" + site.contact_phone.replace(/[^0-9+]/g, "")}
+              >
+                {site.contact_phone}
+              </a>
+            )}
+            <div className="footer-location">
+              <MapPin size={14} />{" "}
+              {site.contact_address || "Pattambi, Kerala, India"}
+            </div>
+          </div>
+        </div>
+        <div className="footer-bottom">
+          <span>
+            © {new Date().getFullYear()} Local Mate. A little closer to home.
+          </span>
+          <div>
+            <button onClick={() => open({ type: "policy", policy: "privacy" })}>
+              Privacy policy
+            </button>
+            <button onClick={() => open({ type: "policy", policy: "terms" })}>
+              Terms of service
+            </button>
+            <span>
+              <Globe size={13} /> English / മലയാളം
+            </span>
+          </div>
+        </div>
+      </footer>
+      {modal && (
+        <Modal
+          modal={modal}
+          close={() => setModal(null)}
+          {...context}
+          setLocation={(v) => {
+            setLocation(v);
+            localStorage.setItem("lm-location", v);
+          }}
+        />
+      )}
+      {toast && (
+        <div className="toast" role="status">
+          <CheckCircle2 size={20} />
+          {toast}
+          <button
+            onClick={() => setToast("")}
+            aria-label="Dismiss notification"
+          >
+            <X size={15} />
+          </button>
+        </div>
+      )}
+    </VoiceProvider>
+  );
+}
+function ServiceCard({ service: s, onClick, count = 0 }) {
+  return (
+    <button className="service-card" onClick={onClick}>
+      <div className={"service-image " + s.tone}>
+        {[
+          "cleaning",
+          "plumbing",
+          "electrical",
+          "ac",
+          "painting",
+          "carpentry",
+        ].includes(s.id) ? (
+          <img src={"/assets/" + s.id + ".png"} alt="" />
+        ) : (
+          <span>{s.icon}</span>
+        )}
+        <span className="service-arrow">
+          <ArrowUpRight size={16} />
+        </span>
+      </div>
+      <h3>{s.name}</h3>
+      <div className="service-price">
+        {s.price ? (
+          <>
+            <span>Est. from</span> <strong>{rupees(s.price)}</strong>
+          </>
+        ) : (
+          <span>Get a personalised quote</span>
+        )}
+      </div>
+      <small className="service-count">
+        {count} local provider{count === 1 ? "" : "s"} · View rates
+      </small>
+    </button>
+  );
+}
+function AccountGate({ heading, children, open }) {
+  return (
+    <section className="section-shell content-page">
+      <div className="eyebrow muted">YOUR LOCAL MATE</div>
+      <h1>{heading}</h1>
+      <Empty
+        icon={UserRound}
+        title="A little closer starts here"
+        action={
+          <Button onClick={() => open({ type: "signin" })}>
+            Sign in to continue <ArrowRight size={16} />
+          </Button>
+        }
+      >
+        {children}
+      </Empty>
+    </section>
+  );
+}
+function CustomerPortal(props) {
+  const { me, tab, go, open, notify, refresh } = props;
+  const [bookings, setBookings] = useState([]),
+    [addresses, setAddresses] = useState([]),
+    [payments, setPayments] = useState([]),
+    [loading, setLoading] = useState(true),
+    [error, setError] = useState("");
+  useEffect(() => {
+    if (!me) return;
+    setLoading(true);
+    Promise.all([api("/bookings"), api("/addresses"), api("/payments")])
+      .then(([a, b, c]) => {
+        setBookings(a);
+        setAddresses(b);
+        setPayments(c);
+      })
+      .catch((e) => setError(e.message))
+      .finally(() => setLoading(false));
+  }, [me, refresh]);
+  useEffect(() => {
+    if (!me) return;
+    let alive = true;
+    const timer = setInterval(
+      () =>
+        api("/bookings")
+          .then((d) => {
+            if (alive) setBookings(d);
+          })
+          .catch((e) => {
+            if (alive) setError(e.message);
+          }),
+      15000,
+    );
+    return () => {
+      alive = false;
+      clearInterval(timer);
+    };
+  }, [me]);
+  if (!me)
+    return (
+      <AccountGate heading="Your home for getting things done." open={open}>
+        Sign in to manage your bookings, addresses and messages.
+      </AccountGate>
+    );
+  return (
+    <section className="section-shell portal">
+      <div className="portal-heading">
+        <div>
+          <div className="eyebrow muted">YOUR NEIGHBOURHOOD, YOUR SPACE</div>
+          <h1>
+            Hello, {me.name.split(" ")[0]}
+            <span className="wave"> 👋</span>
+          </h1>
+          <p>Let’s take a few things off your list.</p>
+        </div>
+        <Button onClick={() => go("services")}>
+          Book a service <Plus size={17} />
+        </Button>
+      </div>
+      <div className="portal-layout">
+        <aside>
+          {[
+            ["bookings", ClipboardList, "My bookings"],
+            ["messages", MessageSquare, "Messages"],
+            ["profile", UserRound, "My profile"],
+            ["addresses", MapPin, "Saved addresses"],
+            ["invoices", Download, "Invoice history"],
+            ["calls", Phone, "Call history"],
+            ["payments", Wallet, "Payments"],
+            ["support", Headphones, "Help & support"],
+          ].map(([k, Icon, t]) => (
+            <button
+              className={tab === k ? "selected" : ""}
+              onClick={() => go(k)}
+              key={k}
+            >
+              <Icon size={18} />
+              {t}
+            </button>
+          ))}
+          <button
+            onClick={async () => {
+              try {
+                await api("/auth/signout", {});
+                props.reload();
+                props.notify("You’ve signed out.");
+              } catch (e) {
+                props.notify(e.message);
+              }
+            }}
+          >
+            <LogOut size={17} />
+            Sign out
+          </button>
+        </aside>
+        <div className="portal-content">
+          {error && <p className="form-error">{error}</p>}
+          {tab === "invoices" ? (
+            <InvoiceHistory api={api} />
+          ) : tab === "calls" ? (
+            <CallHistory api={api} />
+          ) : tab === "messages" ? (
+            <div className="panel">
+              <MessagesInbox
+                bookings={bookings}
+                me={me}
+                api={api}
+                open={open}
+              />
+            </div>
+          ) : tab === "bookings" ? (
+            <>
+              <div className="stats-grid">
+                <Stat
+                  label="Upcoming"
+                  value={
+                    bookings.filter(
+                      (b) =>
+                        !["cancelled", "work_completed"].includes(b.status),
+                    ).length
+                  }
+                />
+                <Stat
+                  label="Completed"
+                  value={
+                    bookings.filter((b) => b.status === "work_completed").length
+                  }
+                />
+                <Stat label="Total bookings" value={bookings.length} />
+              </div>
+              <div className="panel">
+                <h2>Your bookings</h2>
+                <p className="muted-copy">
+                  Open a booking to message or call your provider, follow job
+                  progress and view shared GPS.
+                </p>
+                {loading ? (
+                  <Loading />
+                ) : bookings.length ? (
+                  bookings.map((b) => (
+                    <BookingRow
+                      key={b.id}
+                      booking={b}
+                      onClick={() => open({ type: "booking", id: b.id })}
+                    />
+                  ))
+                ) : (
+                  <Empty
+                    title="Your to-do list starts here"
+                    action={
+                      <Button secondary onClick={() => go("services")}>
+                        Explore services <ArrowRight size={16} />
+                      </Button>
+                    }
+                  >
+                    No bookings yet. When you need a hand, we’re right here.
+                  </Empty>
+                )}
+              </div>
+            </>
+          ) : tab === "profile" ? (
+            <div className="panel">
+              <h2>A little about you</h2>
+              <CredentialsPanel
+                me={me}
+                api={api}
+                notify={notify}
+                reload={props.reload}
+              />
+              <Form
+                onSubmit={async (data) => {
+                  await api("/profile", data);
+                  props.reload();
+                  notify("Your profile has been updated.");
+                }}
+              >
+                <Field label="Your name">
+                  <input
+                    name="name"
+                    defaultValue={me.name}
+                    required
+                    maxLength={100}
+                  />
+                </Field>
+                <Field label="Username">
+                  <input value={me.username || ""} readOnly />
+                </Field>
+                <Field
+                  label="Indian mobile number"
+                  hint="Used for booking coordination. Private account information. Other customers and providers cannot view this number."
+                >
+                  <input
+                    name="phone"
+                    type="tel"
+                    placeholder="+919876543210"
+                    defaultValue={me.phone}
+                    required
+                    pattern="(\+91)?[6-9][0-9]{9}"
+                  />
+                </Field>
+              </Form>
+            </div>
+          ) : tab === "addresses" ? (
+            <div className="panel">
+              <div className="panel-heading">
+                <h2>Your saved places</h2>
+                <Button secondary onClick={() => open({ type: "address" })}>
+                  <Plus size={16} />
+                  Add address
+                </Button>
+              </div>
+              {addresses.length ? (
+                addresses.map((a) => (
+                  <div className="address-card" key={a.id}>
+                    <MapPin size={22} />
+                    <div>
+                      <h3>{a.label}</h3>
+                      <p>{a.address}</p>
+                      <small>{a.location}</small>
+                    </div>
+                    <button
+                      className="text-link"
+                      onClick={() => open({ type: "address", address: a })}
+                    >
+                      Edit
+                    </button>
+                    <button
+                      className="subtle"
+                      onClick={() =>
+                        open({
+                          type: "confirm",
+                          heading: "Delete this address?",
+                          description: "You can add it again later.",
+                          action: async () => {
+                            await api(
+                              "/addresses/" + a.id,
+                              undefined,
+                              "DELETE",
+                            );
+                            props.reload();
+                            notify("Address removed.");
+                          },
+                        })
+                      }
+                    >
+                      Remove
+                    </button>
+                  </div>
+                ))
+              ) : (
+                <Empty icon={MapPin} title="Every home has an address">
+                  Save your places for an easier booking next time.
+                </Empty>
+              )}
+            </div>
+          ) : (
+            <div className="panel">
+              <h2>Payments & receipts</h2>
+              <p className="muted-copy">
+                Online payments appear only after server verification. Cash
+                payments remain pending until recorded.
+              </p>
+              {payments.length ? (
+                payments.map((p) => (
+                  <div className="table-row" key={p.id}>
+                    <Wallet size={20} />
+                    <div>
+                      <strong>{rupees(p.amount)}</strong>
+                      <small>{date(p.created_at)}</small>
+                    </div>
+                    <Status value={p.status} />
+                  </div>
+                ))
+              ) : (
+                <Empty icon={Wallet} title="Nothing to pay here yet">
+                  Your verified online transactions will appear here.
+                </Empty>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    </section>
+  );
+}
+function Stat({ label, value }) {
+  return (
+    <div className="stat">
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+}
+function Status({ value }) {
+  return <span className={"status " + value}>{title(value)}</span>;
+}
+function BookingRow({ booking: b, onClick }) {
+  return (
+    <button className="booking-row" onClick={onClick}>
+      <span className="booking-symbol">
+        <BriefcaseBusiness size={21} />
+      </span>
+      <span className="booking-info">
+        <strong>{b.service_name}</strong>
+        <small>
+          {date(b.scheduled_at)} · {b.location}
+        </small>
+        {b.provider_name && <small>With {b.provider_name}</small>}
+      </span>
+      <Status value={b.request_expired ? "expired" : b.status} />
+      <ChevronRight size={17} />
+    </button>
+  );
+}
+function Loading() {
+  return (
+    <div className="loading">
+      <LoaderCircle className="spin" size={23} /> Just a moment…
+    </div>
+  );
+}
+function ProviderDirectory({
+  providers,
+  open,
+  location,
+  go,
+  requireUser,
+  notify,
+  catalog,
+}) {
+  const [q, setQ] = useState(""),
+    [sort, setSort] = useState("recommended");
+  const shown = providers
+    .filter(
+      (p) =>
+        array(p.locations).includes(location) &&
+        (p.name + " " + p.category + " " + p.description)
+          .toLowerCase()
+          .includes(q.toLowerCase()),
+    )
+    .sort((a, b) =>
+      sort === "rating"
+        ? (b.rating || 0) - (a.rating || 0)
+        : sort === "experience"
+          ? b.experience - a.experience
+          : 0,
+    );
+  return (
+    <section className="section-shell content-page">
+      <div className="eyebrow muted">GOOD PEOPLE. GREAT WORK.</div>
+      <h1>Meet your local helping hands.</h1>
+      <p className="subtitle">
+        Approved professionals serving {location}. Real people, close to home.
+      </p>
+      <div className="filter-row">
+        <div className="listing-search">
+          <Search size={19} />
+          <input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Search a name or skill"
+          />
+        </div>
+        <select
+          aria-label="Sort providers"
+          value={sort}
+          onChange={(e) => setSort(e.target.value)}
+        >
+          <option value="recommended">Recommended</option>
+          <option value="rating">Highest rated</option>
+          <option value="experience">Most experience</option>
+        </select>
+      </div>
+      {shown.length ? (
+        <div className="provider-grid">
+          {shown.map((p) => (
+            <div className="panel provider-card" key={p.user_id}>
+              <div className="provider-top">
+                <span className="provider-avatar">{p.name[0]}</span>
+                <button
+                  aria-label="Save provider"
+                  onClick={() =>
+                    requireUser(async () => {
+                      try {
+                        await api("/favourites", { provider_id: p.user_id });
+                        notify("Provider saved to favourites.");
+                      } catch (e) {
+                        notify(e.message);
+                      }
+                    })
+                  }
+                >
+                  <Heart size={18} />
+                </button>
+              </div>
+              <h3>
+                {p.business_name || p.name} <ShieldCheck size={17} />
+              </h3>
+              <p>{p.description}</p>
+              <small>
+                {p.experience} years of experience · {p.category}
+              </small>
+              <ProviderRates provider={p} catalog={catalog} />
+              <Button
+                secondary
+                onClick={() => open({ type: "provider-detail", provider: p })}
+              >
+                View profile <ArrowRight size={16} />
+              </Button>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <Empty
+          icon={Users}
+          title="Your neighbourhood is coming together"
+          action={
+            <Button onClick={() => go("provider")}>
+              Be one of our first professionals <ArrowRight size={16} />
+            </Button>
+          }
+        >
+          No approved professionals match this search in {location} yet. We’re
+          welcoming local skills, one person at a time.
+        </Empty>
+      )}
+    </section>
+  );
+}
+function ProviderPortal(props) {
+  const { me, open, go } = props;
+  if (!me?.provider)
+    return (
+      <section className="section-shell provider-intro">
+        <div>
+          <div className="eyebrow muted">MAKE A LIVING. MAKE A DIFFERENCE.</div>
+          <h1>
+            Your skills.
+            <br />
+            Your neighbourhood.
+            <br />
+            <em>Your next chapter.</em>
+          </h1>
+          <p>
+            Join Local Mate and connect with people who need what you do best.
+            Work in your area, manage your own time, and grow with your
+            community.
+          </p>
+          <div className="benefit-list">
+            {[
+              "No joining fee",
+              "Choose the areas you serve",
+              "Accept the jobs that work for you",
+              "Clear, transparent earnings",
+            ].map((t) => (
+              <span key={t}>
+                <CheckCircle2 size={18} />
+                {t}
+              </span>
+            ))}
+          </div>
+          <Button
+            onClick={() =>
+              me
+                ? open({ type: "register-provider" })
+                : open({ type: "signin" })
+            }
+          >
+            Join your local community <ArrowRight size={17} />
+          </Button>
+          <small>
+            All applications are reviewed before bookings are enabled.
+          </small>
+        </div>
+        <div className="provider-intro-art">
+          <span>🧰</span>
+          <h3>
+            A little skill.
+            <br />A lot of possibility.
+          </h3>
+          <div>
+            <MapPin size={15} /> Starting in Pattambi, Kerala
+          </div>
+        </div>
+      </section>
+    );
+  return (
+    <ProviderOperationsPortal
+      {...props}
+      api={api}
+      renderMessages={(bookings) => (
+        <MessagesInbox bookings={bookings} me={me} api={api} open={open} />
+      )}
+      renderSupport={() => <Support {...props} />}
+    />
+  );
+}
+function AdminPortal(props) {
+  const { me, open, notify, reload, refresh, go } = props;
+  const [tab, setTab] = useState("overview"),
+    [result, setResult] = useState(null),
+    [error, setError] = useState(""),
+    [overview, setOverview] = useState(null),
+    [overviewError, setOverviewError] = useState(""),
+    [retry, setRetry] = useState(0);
+  const endpoint = {
+    providers: "providers",
+    services: "services",
+    users: "users",
+    logs: "logs",
+  };
+  const resultKey = [me?.id, tab, refresh, retry].join(":");
+  const current = result?.key === resultKey ? result : null;
+  const data = current?.items ?? null;
+  const dataError = current?.error || "";
+  useEffect(() => {
+    if (!me?.admin) return;
+    let active = true;
+    setOverviewError("");
+    api("/admin/overview")
+      .then((value) => {
+        if (active) setOverview(value);
+      })
+      .catch((e) => {
+        if (active) setOverviewError(e.message);
+      });
+    return () => {
+      active = false;
+    };
+  }, [me?.id, me?.admin, refresh]);
+  useEffect(() => {
+    if (!me?.admin) return;
+    let active = true;
+    setError("");
+    const path =
+      tab === "bookings"
+        ? "/bookings?role=admin"
+        : tab === "support"
+          ? "/support"
+          : endpoint[tab]
+            ? "/admin/" + endpoint[tab]
+            : null;
+    if (path) {
+      api(path)
+        .then((value) => {
+          const items = adminRows(tab, value);
+          if (active) setResult({ key: resultKey, items, error: "" });
+        })
+        .catch((e) => {
+          if (active)
+            setResult({ key: resultKey, items: null, error: e.message });
+        });
+    }
+    return () => {
+      active = false;
+    };
+  }, [me?.id, me?.admin, tab, refresh, retry]);
+  if (!me)
+    return (
+      <AccountGate heading="Your neighbourhood, in good hands." open={open}>
+        Sign in with your administrator username and password.
+      </AccountGate>
+    );
+  if (!me.admin)
+    return (
+      <section className="section-shell content-page">
+        <h1>Administrator access</h1>
+        <div className="notice">
+          <ShieldCheck size={25} />
+          <div>
+            <strong>This area is for authorized administrators.</strong>
+            <p>
+              You’re signed in as {me.username || me.name}. Contact your
+              administrator if you need access.
+            </p>
+          </div>
+        </div>
+        <Button secondary onClick={() => go("bookings")}>
+          Go to my account
+        </Button>
+      </section>
+    );
+  const tabs = [
+    ["overview", LayoutDashboard],
+    ["bookings", ClipboardList],
+    ["providers", Users],
+    ["services", BriefcaseBusiness],
+    ["users", UserRound],
+    ["content", House],
+    ["locations", MapPin],
+    ["support", Headphones],
+    ["backup", Download],
+    ["data", AlertCircle],
+    ["settings", Settings],
+    ["logs", Clock],
+    ["operations", Settings],
+    ["commissions", Wallet],
+    ["invoices", Download],
+    ["disputes", AlertCircle],
+    ["media", ShieldCheck],
+    ["voice", Phone],
+    ["workflow", Clock],
+  ];
+  return (
+    <section className="section-shell portal">
+      <div className="portal-heading">
+        <div>
+          <div className="eyebrow muted">YOUR WEBSITE, IN GOOD HANDS</div>
+          <h1>Local Mate administration</h1>
+          <p>Manage customers, professionals, bookings and your website.</p>
+        </div>
+        <span className="status approved">Administrator · {me.username}</span>
+      </div>
+      {error && <p className="form-error">{error}</p>}
+      <div className="portal-layout">
+        <aside>
+          {tabs.map(([t, Icon]) => (
+            <button
+              key={t}
+              className={tab === t ? "selected" : ""}
+              onClick={() => setTab(t)}
+            >
+              <Icon size={18} />
+              {t === "content"
+                ? "Website & portals"
+                : t === "data"
+                  ? "Delete all data"
+                  : t === "operations"
+                    ? "Booking, OTP & calling"
+                    : t === "commissions"
+                      ? "Weekly commissions"
+                      : t === "media"
+                        ? "Image privacy review"
+                        : t === "voice"
+                          ? "Call metadata"
+                          : t === "workflow"
+                            ? "Workflow & OTP audit"
+                            : title(t)}
+            </button>
+          ))}
+        </aside>
+        <div className="portal-content">
+          {[
+            "operations",
+            "commissions",
+            "invoices",
+            "disputes",
+            "media",
+            "voice",
+            "workflow",
+          ].includes(tab) ? (
+            <OperationsAdmin tab={tab} api={api} {...props} />
+          ) : ["content", "locations", "backup", "data"].includes(tab) ? (
+            <AdminTools tab={tab} api={api} {...props} />
+          ) : tab === "overview" ? (
+            <>
+              {overviewError && (
+                <p className="form-error" role="alert">
+                  {overviewError}
+                </p>
+              )}
+              {overview ? (
+                <div className="stats-grid">
+                  <Stat label="Customer accounts" value={overview.customers} />
+                  <Stat label="Providers" value={overview.providers} />
+                  <Stat label="Pending approvals" value={overview.pending} />
+                  <Stat label="Bookings" value={overview.bookings} />
+                  <Stat
+                    label="Verified payments"
+                    value={rupees(overview.paid)}
+                  />
+                </div>
+              ) : (
+                <Loading />
+              )}
+              <div className="panel">
+                <h2>Set up your neighbourhood</h2>
+                <p>
+                  Initialize the default services and towns, review providers,
+                  or edit your website and portal settings.
+                </p>
+                <div className="actions">
+                  <Button
+                    onClick={async () => {
+                      try {
+                        await api("/setup", {});
+                        reload();
+                        notify("Services and locations are ready.");
+                      } catch (e) {
+                        setError(e.message);
+                      }
+                    }}
+                  >
+                    Initialize default services <Plus size={16} />
+                  </Button>
+                  <Button secondary onClick={() => setTab("content")}>
+                    Website controls <Settings size={16} />
+                  </Button>
+                </div>
+              </div>
+            </>
+          ) : tab === "settings" ? (
+            <>
+              <CredentialsPanel
+                me={me}
+                api={api}
+                notify={notify}
+                reload={reload}
+              />
+              <div className="panel">
+                <h2>Commission settings</h2>
+                <Form
+                  onSubmit={async (d) => {
+                    await api("/admin/commission", {
+                      percent: Number(d.percent),
+                    });
+                    reload();
+                    notify("Commission setting saved.");
+                  }}
+                >
+                  <Field
+                    label="Platform commission (%)"
+                    hint="This saves a rate; no payment or payout is initiated automatically."
+                  >
+                    <input
+                      name="percent"
+                      type="number"
+                      min="0"
+                      max="100"
+                      step="0.1"
+                      defaultValue={overview?.commission ?? 10}
+                      required
+                    />
+                  </Field>
+                </Form>
+              </div>
+            </>
+          ) : (
+            <div className="panel">
+              <div className="panel-heading">
+                <h2>{title(tab)}</h2>
+                {tab === "providers" && (
+                  <Button
+                    secondary
+                    onClick={() => open({ type: "edit-provider" })}
+                  >
+                    <Plus size={15} />
+                    Add provider
+                  </Button>
+                )}
+                {tab === "services" && (
+                  <Button
+                    secondary
+                    onClick={() => open({ type: "edit-service" })}
+                  >
+                    <Plus size={15} />
+                    Add service
+                  </Button>
+                )}
+                {tab === "bookings" && (
+                  <Button
+                    secondary
+                    onClick={() =>
+                      downloadCSV(data || [], "local-mate-bookings.csv")
+                    }
+                  >
+                    <Download size={15} />
+                    Export
+                  </Button>
+                )}
+              </div>
+              {dataError ? (
+                <div className="admin-list-error">
+                  <p className="form-error" role="alert">
+                    {dataError}
+                  </p>
+                  <Button secondary onClick={() => setRetry((n) => n + 1)}>
+                    {tab === "providers"
+                      ? "Retry provider list"
+                      : "Retry loading list"}
+                  </Button>
+                </div>
+              ) : !data ? (
+                <Loading />
+              ) : !data.length ? (
+                <Empty title="Nothing here yet">
+                  New activity appears here as your marketplace grows.
+                </Empty>
+              ) : tab === "bookings" ? (
+                data.map((b) => (
+                  <div key={b.id}>
+                    <BookingRow
+                      booking={b}
+                      onClick={() =>
+                        open({ type: "booking", id: b.id, role: "admin" })
+                      }
+                    />
+                    <button
+                      className="text-link row-extra"
+                      onClick={() => open({ type: "assign", booking: b })}
+                    >
+                      Assign or reassign provider
+                    </button>
+                  </div>
+                ))
+              ) : tab === "providers" ? (
+                data.map((p) => (
+                  <div className="admin-provider" key={p.user_id}>
+                    <div>
+                      <strong>
+                        {p.business_name || p.name || "Unnamed provider"}
+                      </strong>
+                      <small>
+                        {p.category} · {p.phone}
+                      </small>
+                      <p>{p.description}</p>
+                      <small>
+                        {array(p.locations).join(", ")} ·{" "}
+                        {p.experience == null
+                          ? "Experience not set"
+                          : p.experience + " years"}
+                      </small>
+                    </div>
+                    <Status value={p.status} />
+                    <div className="actions">
+                      <Button
+                        secondary
+                        onClick={() =>
+                          open({ type: "edit-provider", provider: p })
+                        }
+                      >
+                        Edit profile & rates
+                      </Button>
+                      <Button
+                        secondary
+                        onClick={() =>
+                          open({
+                            type: "confirm",
+                            heading: "Approve this provider?",
+                            description:
+                              "Confirm you have reviewed their identity, qualifications and service details.",
+                            action: async () => {
+                              await api("/admin/provider", {
+                                user_id: p.user_id,
+                                status: "approved",
+                              });
+                              reload();
+                              notify("Provider approved.");
+                            },
+                          })
+                        }
+                      >
+                        Approve
+                      </Button>
+                      <button
+                        className="danger-link"
+                        onClick={() =>
+                          open({
+                            type: "confirm",
+                            heading: "Change provider status?",
+                            description:
+                              "This prevents the provider from receiving new requests.",
+                            action: async () => {
+                              await api("/admin/provider", {
+                                user_id: p.user_id,
+                                status:
+                                  p.status === "approved"
+                                    ? "suspended"
+                                    : "rejected",
+                              });
+                              reload();
+                              notify("Provider status updated.");
+                            },
+                          })
+                        }
+                      >
+                        {p.status === "approved" ? "Suspend" : "Reject"}
+                      </button>
+                    </div>
+                  </div>
+                ))
+              ) : tab === "services" ? (
+                data.map((s) => (
+                  <div className="table-row" key={s.id}>
+                    <span className="mini-emoji">{s.icon}</span>
+                    <div>
+                      <strong>{s.name}</strong>
+                      <small>
+                        {s.category} · {title(s.type)} ·{" "}
+                        {s.price ? rupees(s.price) : "Quote"}
+                      </small>
+                    </div>
+                    <Status value={s.active ? "active" : "inactive"} />
+                    <button
+                      className="text-link"
+                      onClick={() =>
+                        open({ type: "service-roster", service: s })
+                      }
+                    >
+                      Manage providers
+                    </button>
+                    <button
+                      className="text-link"
+                      onClick={() => open({ type: "edit-service", service: s })}
+                    >
+                      Edit
+                    </button>
+                  </div>
+                ))
+              ) : tab === "users" ? (
+                data.map((u) => (
+                  <div className="admin-account" key={u.id}>
+                    <div className="panel-heading">
+                      <div>
+                        <h3>{u.name || u.username || "Account"}</h3>
+                        <small className="muted-copy">
+                          Username: {u.username || "Not set"} ·{" "}
+                          {u.phone || "No phone added"}
+                        </small>
+                      </div>
+                      <Status
+                        value={u.is_active === false ? "suspended" : "active"}
+                      />
+                    </div>
+                    <AdminUserActions
+                      user={u}
+                      me={me}
+                      api={api}
+                      reload={reload}
+                      notify={notify}
+                    />
+                  </div>
+                ))
+              ) : tab === "support" ? (
+                data.map((t) => (
+                  <div className="ticket" key={t.id}>
+                    <div>
+                      <h3>{t.subject}</h3>
+                      <Status value={t.status} />
+                    </div>
+                    <p>{t.body}</p>
+                    {t.resolution && (
+                      <p>
+                        <strong>Response: </strong>
+                        {t.resolution}
+                      </p>
+                    )}
+                    <button
+                      className="text-link"
+                      onClick={() =>
+                        open({ type: "resolve-ticket", ticket: t })
+                      }
+                    >
+                      Review & respond <ArrowRight size={14} />
+                    </button>
+                  </div>
+                ))
+              ) : (
+                data.map((row, i) => (
+                  <div className="table-row" key={row.id || i}>
+                    <div>
+                      <strong>{row.action || row.name}</strong>
+                      <small>{date(row.created_at)}</small>
+                    </div>
+                    {row.target_id && <small>{row.target_id}</small>}
+                  </div>
+                ))
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    </section>
+  );
+}
+function Support({ me, open, notify, refresh, reload }) {
+  const [tickets, setTickets] = useState([]),
+    [error, setError] = useState("");
+  useEffect(() => {
+    if (me)
+      api("/support")
+        .then(setTickets)
+        .catch((e) => setError(e.message));
+  }, [me, refresh]);
+  return (
+    <section className="section-shell content-page">
+      <div className="eyebrow muted">WE’RE AROUND THE CORNER</div>
+      <h1>A little help with your help?</h1>
+      <p className="subtitle">
+        Questions, booking concerns, or something we can do better. We’re
+        listening.
+      </p>
+      <div className="support-grid">
+        <div className="panel">
+          <h2>Send us a note</h2>
+          {me ? (
+            <Form
+              submit="Create support ticket"
+              onSubmit={async (d) => {
+                await api("/support", d);
+                reload();
+                notify("Your support ticket has been created.");
+              }}
+            >
+              <Field label="What is this about?">
+                <input
+                  name="subject"
+                  required
+                  maxLength={200}
+                  placeholder="A booking, a payment, or something else"
+                />
+              </Field>
+              <Field label="Tell us a little more">
+                <textarea name="body" required rows={5} maxLength={4000} />
+              </Field>
+              <Field label="Booking reference (optional)">
+                <input
+                  name="booking_id"
+                  placeholder="Booking ID, if you have one"
+                />
+              </Field>
+            </Form>
+          ) : (
+            <Empty
+              icon={Headphones}
+              title="Let’s get you connected"
+              action={
+                <Button onClick={() => open({ type: "signin" })}>
+                  Sign in to contact support
+                </Button>
+              }
+            >
+              Sign in so your conversation stays private and easy to find.
+            </Empty>
+          )}
+        </div>
+        <div>
+          <div className="panel">
+            <h2>Your support requests</h2>
+            {error && <p className="form-error">{error}</p>}
+            {tickets.length ? (
+              tickets.map((t) => (
+                <div className="ticket" key={t.id}>
+                  <div>
+                    <h3>{t.subject}</h3>
+                    <Status value={t.status} />
+                  </div>
+                  <p>{t.body}</p>
+                  {t.resolution && <p className="resolution">{t.resolution}</p>}
+                  <small>{date(t.created_at)}</small>
+                </div>
+              ))
+            ) : (
+              <p className="muted-copy">
+                You have no open requests. We’re here whenever you need us.
+              </p>
+            )}
+          </div>
+          <button className="faq-link" onClick={() => open({ type: "faq" })}>
+            Find a quick answer in our FAQs <ArrowUpRight size={18} />
+          </button>
+        </div>
+      </div>
+    </section>
+  );
+}
+function downloadCSV(data, name) {
+  const keys = [...new Set(data.flatMap(Object.keys))];
+  const safe = (v) => {
+    let s = String(v ?? "");
+    if (/^[=+@\-]/.test(s)) s = "'" + s;
+    return '"' + s.replaceAll('"', '""') + '"';
+  };
+  const url = URL.createObjectURL(
+    new Blob(
+      [
+        keys.map(safe).join(","),
+        ...data.map((row) => keys.map((k) => safe(row[k])).join(",")),
+      ].join("\n"),
+      { type: "text/csv" },
+    ),
+  );
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+}
+function Modal({ modal: m, close, ...ctx }) {
+  const voiceState = useVoiceState();
+  const hasVoicePanel = !!voiceState?.state.call || !!voiceState?.state.error;
+  const {
+    me,
+    notify,
+    reload,
+    open,
+    location,
+    setLocation,
+    catalog,
+    providers,
+    locations = defaultLocations,
+  } = ctx;
+  const site = ctx.website?.content || {};
+  const ref = React.useRef(null);
+  useEffect(() => {
+    const previous = document.activeElement;
+    const old = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const el = ref.current;
+    el?.focus();
+    const key = (e) => {
+      if (e.key === "Escape") close();
+      if (e.key === "Tab") {
+        const items = el?.querySelectorAll(
+          'button,a[href],input,select,textarea,[tabindex="0"]',
+        );
+        const joined = [
+          ...(items || []),
+          ...document.querySelectorAll(
+            ".voice-panel button,.voice-panel select",
+          ),
+        ];
+        const first = joined[0],
+          last = joined[joined.length - 1];
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault();
+          last?.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault();
+          first?.focus();
+        }
+      }
+    };
+    document.addEventListener("keydown", key);
+    return () => {
+      document.body.style.overflow = old;
+      document.removeEventListener("keydown", key);
+      previous?.focus();
+    };
+  }, [m.type]);
+  const heading =
+    {
+      "edit-provider": m.provider ? "Edit provider" : "Add provider",
+      "service-roster": "Manage service providers",
+      signin: "A little closer to home.",
+      location: "Where can we lend a hand?",
+      service: m.service?.name,
+      booking: "Your booking",
+      address: m.address ? "Edit your address" : "A place to call home",
+      notifications: "Your neighbourhood updates",
+      "register-provider": "Your next chapter starts here.",
+      "edit-service": m.service ? "Edit service" : "Add a service",
+      confirm: m.heading,
+      quote: "A clear quote. A good start.",
+      chat: "A little conversation",
+      review: "How did it go?",
+      assign: "The right person for the job",
+      "resolve-ticket": "Review support request",
+      about: "Your neighbourhood. Your trusted helpers.",
+      faq: "A few things you might be wondering.",
+      "provider-detail": m.provider?.business_name || m.provider?.name,
+      policy: {
+        terms: "Terms of service",
+        privacy: "Your privacy matters",
+        cancellation: "Cancellations & refunds",
+      }[m.policy],
+    }[m.type] || "Local Mate";
+  return (
+    <div
+      className="modal-backdrop"
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) close();
+      }}
+    >
+      <section
+        className={"modal modal-" + m.type}
+        role="dialog"
+        aria-modal={!hasVoicePanel}
+        aria-label={heading}
+        ref={ref}
+        tabIndex={-1}
+      >
+        <button
+          className="modal-close"
+          onClick={close}
+          aria-label="Close dialog"
+        >
+          <X size={21} />
+        </button>
+        <div className="modal-eyebrow">
+          <House size={15} /> LOCAL MATE
+        </div>
+        <h2>{heading}</h2>
+        {m.type === "edit-provider" ? (
+          <ProviderEditor
+            admin
+            provider={m.provider}
+            api={api}
+            {...ctx}
+            close={close}
+          />
+        ) : m.type === "service-roster" ? (
+          <ServiceRoster service={m.service} api={api} {...ctx} />
+        ) : m.type === "signin" ? (
+          <SignIn
+            notify={notify}
+            reload={reload}
+            close={close}
+            go={ctx.go}
+            registrationEnabled={ctx.website?.registration_enabled !== false}
+          />
+        ) : m.type === "location" ? (
+          <>
+            <p>
+              Starting close to home. Select the town where you need a hand.
+            </p>
+            <div className="locations">
+              {locations.length === 0 && (
+                <p className="muted-copy">
+                  No service areas are currently active.
+                </p>
+              )}
+              {locations.map((l) => (
+                <button
+                  key={l}
+                  className={l === location ? "selected" : ""}
+                  onClick={() => {
+                    setLocation(l);
+                    close();
+                    notify("Your neighbourhood is now " + l + ".");
+                  }}
+                >
+                  <MapPin size={19} />
+                  <span>
+                    {l}
+                    <small>Kerala, India</small>
+                  </span>
+                  {l === location ? (
+                    <CheckCircle2 size={19} />
+                  ) : (
+                    <ChevronRight size={16} />
+                  )}
+                </button>
+              ))}
+            </div>
+            <small className="muted-copy">
+              Availability depends on approved professionals in your selected
+              area.
+            </small>
+          </>
+        ) : m.type === "service" ? (
+          <ServiceBooking service={m.service} {...ctx} close={close} />
+        ) : m.type === "booking" ? (
+          <BookingDetails id={m.id} role={m.role} {...ctx} close={close} />
+        ) : m.type === "chat" ? (
+          <Chat id={m.id} {...ctx} />
+        ) : m.type === "address" ? (
+          <SavedPlaceForm
+            address={m.address}
+            api={api}
+            {...ctx}
+            close={close}
+          />
+        ) : m.type === "notifications" ? (
+          <Notifications {...ctx} />
+        ) : m.type === "register-provider" ? (
+          <ProviderApplication {...ctx} close={close} />
+        ) : m.type === "edit-service" ? (
+          <Form
+            onSubmit={async (d) => {
+              await api("/admin/services", {
+                ...d,
+                id: m.service?.id,
+                active: d.active === "on",
+                price: Number(d.price),
+              });
+              reload();
+              notify("Service saved.");
+              close();
+            }}
+          >
+            <div className="form-grid">
+              <Field label="Service name">
+                <input
+                  name="name"
+                  defaultValue={m.service?.name}
+                  required
+                  maxLength={100}
+                />
+              </Field>
+              <Field label="Category">
+                <input
+                  name="category"
+                  defaultValue={m.service?.category || "Home care"}
+                  list="service-category-options"
+                  required
+                  maxLength={100}
+                />
+                <datalist id="service-category-options">
+                  {[
+                    ...new Set([
+                      ...categories,
+                      ...catalog.map((s) => s.category),
+                    ]),
+                  ].map((c) => (
+                    <option key={c} value={c} />
+                  ))}
+                </datalist>
+              </Field>
+            </div>
+            <Field label="Description">
+              <textarea
+                name="description"
+                defaultValue={m.service?.description}
+                required
+                maxLength={1000}
+                rows={3}
+              />
+            </Field>
+            <div className="form-grid">
+              <Field label="Booking type">
+                <select name="type" defaultValue={m.service?.type || "fixed"}>
+                  {[
+                    "fixed",
+                    "quote",
+                    "transport",
+                    "goods",
+                    "rental",
+                    "emergency",
+                  ].map((t) => (
+                    <option value={t} key={t}>
+                      {title(t)}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="Starting estimate (₹)">
+                <input
+                  name="price"
+                  type="number"
+                  min="0"
+                  step="1"
+                  defaultValue={m.service?.price || 0}
+                  required
+                />
+              </Field>
+            </div>
+            <label className="checkbox-row">
+              <input
+                name="active"
+                type="checkbox"
+                defaultChecked={m.service ? !!m.service.active : true}
+              />
+              Active and visible
+            </label>
+          </Form>
+        ) : m.type === "confirm" ? (
+          <>
+            <p>{m.description}</p>
+            <Form
+              submit="Confirm"
+              onSubmit={async () => {
+                await m.action();
+                close();
+              }}
+            />
+          </>
+        ) : m.type === "quote" ? (
+          <Form
+            submit="Send quotation"
+            onSubmit={async (d) => {
+              await api("/bookings/" + m.id + "/quote", {
+                labour: Number(d.labour),
+                materials: Number(d.materials),
+                additional: Number(d.additional),
+                terms: d.terms,
+              });
+              reload();
+              notify("Quotation sent for customer approval.");
+              close();
+            }}
+          >
+            <p>
+              Work is confirmed only after the customer approves your quote.
+            </p>
+            <div className="form-grid">
+              <Field label="Labour (₹)">
+                <input type="number" name="labour" min="0" step="1" required />
+              </Field>
+              <Field label="Materials (₹)">
+                <input
+                  type="number"
+                  name="materials"
+                  min="0"
+                  step="1"
+                  defaultValue="0"
+                  required
+                />
+              </Field>
+              <Field label="Other charges (₹)">
+                <input
+                  type="number"
+                  name="additional"
+                  min="0"
+                  step="1"
+                  defaultValue="0"
+                  required
+                />
+              </Field>
+            </div>
+            <Field label="Time estimate, scope & terms">
+              <textarea name="terms" required rows={4} maxLength={2000} />
+            </Field>
+          </Form>
+        ) : m.type === "review" ? (
+          <Form
+            submit="Share your review"
+            onSubmit={async (d) => {
+              await api("/bookings/" + m.id + "/review", {
+                rating: Number(d.rating),
+                body: d.body,
+              });
+              reload();
+              notify("Thank you. Your verified booking review has been saved.");
+              close();
+            }}
+          >
+            <Field label="Your rating">
+              <select name="rating">
+                {[5, 4, 3, 2, 1].map((n) => (
+                  <option value={n} key={n}>
+                    {"★".repeat(n)} · {n} stars
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Tell your neighbours a little more">
+              <textarea name="body" required maxLength={2000} rows={4} />
+            </Field>
+          </Form>
+        ) : m.type === "assign" ? (
+          <Form
+            submit="Assign provider"
+            onSubmit={async (d) => {
+              await api("/admin/assign", {
+                booking_id: m.booking.id,
+                provider_id: d.provider_id,
+                reason: d.reason,
+              });
+              reload();
+              notify("Provider confirmation requested.");
+              close();
+            }}
+          >
+            <p>
+              {m.booking.service_name} · {m.booking.location}
+            </p>
+            <Field label="Approved professional">
+              <select name="provider_id" required defaultValue="">
+                <option value="" disabled>
+                  Choose a matching provider
+                </option>
+                {providers
+                  .filter(
+                    (p) =>
+                      p.online &&
+                      array(p.service_ids).includes(m.booking.service_id) &&
+                      array(p.locations).includes(m.booking.location),
+                  )
+                  .map((p) => (
+                    <option key={p.user_id} value={p.user_id}>
+                      {p.business_name || p.name}
+                    </option>
+                  ))}
+              </select>
+            </Field>
+            <Field label="Administrator intervention reason">
+              <textarea name="reason" required minLength={10} />
+            </Field>
+            <small className="muted-copy">
+              The provider must confirm acceptance. This action is audited.
+            </small>
+          </Form>
+        ) : m.type === "resolve-ticket" ? (
+          <Form
+            submit="Save response"
+            onSubmit={async (d) => {
+              await api("/admin/support", { ...d, id: m.ticket.id });
+              reload();
+              notify("Support ticket updated.");
+              close();
+            }}
+          >
+            <p>{m.ticket.body}</p>
+            <Field label="Status">
+              <select name="status" defaultValue={m.ticket.status}>
+                {["open", "under_review", "resolved", "closed"].map((t) => (
+                  <option value={t} key={t}>
+                    {title(t)}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Response / resolution">
+              <textarea
+                name="resolution"
+                defaultValue={m.ticket.resolution}
+                rows={4}
+                required
+                maxLength={4000}
+              />
+            </Field>
+          </Form>
+        ) : m.type === "provider-detail" ? (
+          <>
+            <div className="provider-profile-header">
+              <span className="provider-avatar">{m.provider.name[0]}</span>
+              <div>
+                <Status value="approved" />
+                <p>
+                  {m.provider.category} · {m.provider.experience} years of
+                  experience
+                </p>
+              </div>
+            </div>
+            <p>{m.provider.description}</p>
+            <ProviderRates provider={m.provider} catalog={catalog} />
+            <h3>Around your corner</h3>
+            <p>{array(m.provider.locations).join(", ")}</p>
+            <h3>A helping hand with</h3>
+            <div className="pill-list">
+              {array(m.provider.service_ids).map((id) => (
+                <button
+                  key={id}
+                  onClick={() => {
+                    const s = catalog.find((s) => s.id === id);
+                    if (s) open({ type: "service", service: s });
+                  }}
+                >
+                  {catalog.find((s) => s.id === id)?.name || id}
+                  <ArrowUpRight size={13} />
+                </button>
+              ))}
+            </div>
+            <small className="muted-copy">
+              Select a service to view rates. Requests are sent to all eligible
+              providers, and the first acceptance gets the job.
+            </small>
+          </>
+        ) : m.type === "about" && site.about_text ? (
+          <p style={{ whiteSpace: "pre-wrap" }}>{site.about_text}</p>
+        ) : m.type === "about" ? (
+          <>
+            <p>
+              Some days, we all need a helping hand. Local Mate brings everyday
+              services and local skills together in one simple place.
+            </p>
+            <p>
+              We’re starting in Pattambi and nearby towns in Kerala. Our aim is
+              simple: make it easier to find help, and easier for good local
+              professionals to find work.
+            </p>
+            <div className="notice">
+              <Leaf size={24} />
+              <span>Rooted in our neighbourhood. Growing together.</span>
+            </div>
+            <Button
+              onClick={() => {
+                close();
+                ctx.go("services");
+              }}
+            >
+              Explore your neighbourhood <ArrowRight size={16} />
+            </Button>
+          </>
+        ) : m.type === "faq" && site.faq_text ? (
+          <p style={{ whiteSpace: "pre-wrap" }}>{site.faq_text}</p>
+        ) : m.type === "faq" ? (
+          <div className="faqs">
+            {[
+              [
+                "Where is Local Mate available?",
+                "We’re starting with Pattambi, Ottapalam, Thrithala, Shoranur, Cherpulassery and Perinthalmanna. Booking availability depends on approved professionals in each area.",
+              ],
+              [
+                "How are service prices decided?",
+                "Listed prices are starting estimates. Your provider confirms the final quote before work begins. Projects such as painting and carpentry require your approval of a written quotation.",
+              ],
+              [
+                "Can I book a particular professional?",
+                "Requests are sent to all eligible approved providers. The first successful server-side acceptance gets the job. Any required quotation still needs your approval.",
+              ],
+              [
+                "How do I pay?",
+                "Pay after service is the current booking preference. Online payments need a configured payment gateway and verified server confirmation.",
+              ],
+              [
+                "How do I change or cancel a booking?",
+                "Open My bookings, select your booking, and choose reschedule or cancel before work starts. Contact support after work has started.",
+              ],
+              [
+                "Is emergency help guaranteed?",
+                "No. Requests depend on a suitable provider confirming availability. For urgent threats to life or safety, contact the appropriate emergency service.",
+              ],
+              [
+                "Can I join as a service provider?",
+                "Yes. Sign in, add your contact details and apply through Become a pro. Applications must be reviewed before providers receive requests.",
+              ],
+            ].map(([q, a]) => (
+              <details key={q}>
+                <summary>
+                  {q}
+                  <ChevronDown size={16} />
+                </summary>
+                <p>{a}</p>
+              </details>
+            ))}
+          </div>
+        ) : m.type === "policy" ? (
+          <Policy type={m.policy} content={site} />
+        ) : null}
+      </section>
+    </div>
+  );
+}
+function ServiceBooking({
+  service: s,
+  me,
+  open,
+  location,
+  notify,
+  reload,
+  close,
+  providers,
+}) {
+  const [mode, setMode] = useState("detail"),
+    [addresses, setAddresses] = useState([]),
+    [selected, setSelected] = useState(""),
+    [point, setPoint] = useState(null);
+  const [requestPhotos, setRequestPhotos] = useState([]);
+  const [idem] = useState(() => crypto.randomUUID());
+  useEffect(() => {
+    if (me)
+      api("/addresses")
+        .then(setAddresses)
+        .catch(() => {});
+  }, [me]);
+  const available = providers.filter(
+    (p) =>
+      p.online &&
+      array(p.service_ids).includes(s.id) &&
+      array(p.locations).includes(location),
+  );
+  return (
+    <>
+      <div className={"service-detail-image " + s.tone}>
+        {[
+          "cleaning",
+          "plumbing",
+          "electrical",
+          "ac",
+          "painting",
+          "carpentry",
+        ].includes(s.id) ? (
+          <img src={"/assets/" + s.id + ".png"} alt="" />
+        ) : (
+          <span>{s.icon}</span>
+        )}
+        <div>
+          <span>{s.category}</span>
+          <strong>
+            {s.price ? rupees(s.price) : "Your project. Your quote."}
+          </strong>
+          <small>
+            {s.price
+              ? "Starting estimate · Final price confirmed before work"
+              : "Get a personalised quote before work begins"}
+          </small>
+        </div>
+      </div>
+      <p>{s.description}</p>
+      <ServiceProviders
+        me={me}
+        providers={providers}
+        service={s}
+        location={location}
+        selected={selected}
+        onSelect={setSelected}
+      />
+      {mode === "detail" ? (
+        <>
+          <div className="detail-features">
+            <span>
+              <ShieldCheck size={18} />
+              Approval before assignment
+            </span>
+            <span>
+              <CalendarDays size={18} />A time that suits you
+            </span>
+            <span>
+              <MessageSquare size={18} />
+              Booking-linked conversations
+            </span>
+          </div>
+          <div className="availability-note">
+            <MapPin size={16} />
+            {available.length
+              ? available.length +
+                " approved professionals online in " +
+                location
+              : "We’re welcoming professionals in " +
+                location +
+                ". Booking opens when a suitable provider is available."}
+          </div>
+          {s.type === "emergency" && (
+            <p className="form-error">
+              Availability must be confirmed. This is not a guaranteed emergency
+              response service.
+            </p>
+          )}
+          <Button
+            className="full-width"
+            disabled={!!me && !available.length}
+            onClick={() => (me ? setMode("form") : open({ type: "signin" }))}
+          >
+            {s.type === "quote"
+              ? "Tell us about your project"
+              : "Plan your service"}{" "}
+            <ArrowRight size={17} />
+          </Button>
+          <small className="center muted-copy">
+            No payment required to send a request.
+          </small>
+        </>
+      ) : (
+        <Form
+          submit={
+            s.type === "quote" ? "Request a quotation" : "Send booking request"
+          }
+          onSubmit={async (d) => {
+            const created = await api("/bookings", {
+              service_id: s.id,
+              latitude: d.latitude,
+              longitude: d.longitude,
+              destination_latitude: d.destination_latitude,
+              destination_longitude: d.destination_longitude,
+              location,
+              address: d.address,
+              scheduled_at: new Date(
+                d.date + "T" + d.time + ":00+05:30",
+              ).toISOString(),
+              description: d.description,
+              payment_method: "cash",
+              idempotency_key: idem,
+              details: {
+                destination: d.destination,
+                passengers: d.passengers,
+                vehicle: d.vehicle,
+                goods: d.goods,
+                weight: d.weight,
+                loading: d.loading,
+                end_date: d.end_date
+                  ? d.end_date + "T23:59:00+05:30"
+                  : undefined,
+                quantity: d.quantity,
+                delivery: d.delivery,
+                measurements: d.measurements,
+              },
+            });
+            const failedPhotos = [];
+            for (const photo of requestPhotos) {
+              try { await upload(photo, "booking", created.id); }
+              catch (error) { failedPhotos.push(error.message); }
+            }
+            reload();
+            notify(failedPhotos.length
+              ? "Booking created. Some photos failed to upload; open your booking to retry. " + failedPhotos[0]
+              : "Your request was sent to all eligible providers. Photos appear after privacy review.");
+            close();
+          }}
+        >
+          {addresses.length > 0 && (
+            <Field label="Use a saved address">
+              <select
+                defaultValue=""
+                onChange={(e) => {
+                  const a = addresses.find((a) => a.id === e.target.value);
+                  e.target.form.elements.address.value = a?.address || "";
+                  setPoint(
+                    a?.latitude != null
+                      ? { latitude: a.latitude, longitude: a.longitude }
+                      : null,
+                  );
+                }}
+              >
+                <option value="">Choose a saved place</option>
+                {addresses
+                  .filter((a) => a.location === location)
+                  .map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.label} · {a.location}
+                    </option>
+                  ))}
+              </select>
+            </Field>
+          )}
+          <Field
+            label={
+              ["transport", "goods"].includes(s.type)
+                ? "Pickup address"
+                : "Service address"
+            }
+          >
+            <textarea
+              name="address"
+              placeholder="House name, street, landmark & PIN code"
+              rows={2}
+              required
+              maxLength={1000}
+            />
+          </Field>
+          <small className="muted-copy">Service area: {location}, Kerala</small>
+          <PlacePicker
+            value={point}
+            onChange={setPoint}
+            label="Exact service / pickup place (optional)"
+          />
+          {["transport", "goods"].includes(s.type) && (
+            <>
+              <Field label="Destination">
+                <textarea
+                  name="destination"
+                  required
+                  rows={2}
+                  maxLength={1000}
+                />
+              </Field>
+              <PlacePicker
+                prefix="destination_"
+                label="Exact destination (optional)"
+              />
+              <div className="form-grid">
+                <Field label="Vehicle preference">
+                  <select name="vehicle">
+                    <option>Any suitable vehicle</option>
+                    <option>Auto rickshaw</option>
+                    <option>Taxi</option>
+                    <option>Pickup van</option>
+                    <option>Mini lorry</option>
+                  </select>
+                </Field>
+                {s.type === "transport" && (
+                  <Field label="Passengers / items">
+                    <input
+                      name="passengers"
+                      type="number"
+                      min="1"
+                      max="30"
+                      defaultValue="1"
+                    />
+                  </Field>
+                )}
+              </div>
+            </>
+          )}
+          {s.type === "goods" && (
+            <div className="form-grid">
+              <Field label="Goods description">
+                <input name="goods" required maxLength={300} />
+              </Field>
+              <Field label="Approximate weight / size">
+                <input
+                  name="weight"
+                  required
+                  placeholder="e.g. 200 kg, 4 boxes"
+                  maxLength={100}
+                />
+              </Field>
+              <Field label="Loading & unloading">
+                <select name="loading">
+                  <option>Not required</option>
+                  <option>Loading only</option>
+                  <option>Loading and unloading</option>
+                </select>
+              </Field>
+            </div>
+          )}
+          <div className="form-grid">
+            <Field
+              label={
+                s.type === "rental" ? "Rental start date" : "Preferred date"
+              }
+            >
+              <input
+                name="date"
+                type="date"
+                min={new Date().toLocaleDateString("en-CA", {
+                  timeZone: "Asia/Kolkata",
+                })}
+                required
+              />
+            </Field>
+            <Field label="Preferred time (IST)">
+              <input name="time" type="time" required defaultValue="10:00" />
+            </Field>
+          </div>
+          {s.type === "rental" && (
+            <div className="form-grid">
+              <Field label="Rental end date">
+                <input name="end_date" type="date" required />
+              </Field>
+              <Field label="Quantity">
+                <input
+                  type="number"
+                  name="quantity"
+                  min="1"
+                  max="100"
+                  defaultValue="1"
+                  required
+                />
+              </Field>
+              <Field label="Delivery required?">
+                <select name="delivery">
+                  <option>Yes, please deliver</option>
+                  <option>No, I will collect</option>
+                </select>
+              </Field>
+            </div>
+          )}
+          {s.type === "quote" && (
+            <Field label="Measurements / project size (optional)">
+              <input
+                name="measurements"
+                placeholder="e.g. 2 rooms, 800 sq ft"
+                maxLength={300}
+              />
+            </Field>
+          )}
+          <Field
+            label={
+              s.type === "quote"
+                ? "Tell us about your project"
+                : "What needs a helping hand?"
+            }
+          >
+            <textarea
+              name="description"
+              required
+              rows={3}
+              maxLength={4000}
+              placeholder="A few details help us find the right person."
+            />
+          </Field>
+          <div className="payment-choice">
+            <Wallet size={21} />
+            <div>
+              <strong>Pay after service</strong>
+              <small>Agree on the final amount with your provider.</small>
+            </div>
+            <CheckCircle2 size={19} />
+          </div>
+          <Field label="Work photos (optional, up to 5)">
+            <input type="file" accept="image/jpeg,image/png,image/webp" multiple
+              onChange={(event) => setRequestPhotos(Array.from(event.target.files || []).slice(0, 5))} />
+          </Field>
+          <small className="muted-copy">
+            Images are private until an administrator reviews them. Do not include phone numbers.
+            No payment is collected at this step.
+          </small>
+        </Form>
+      )}
+    </>
+  );
+}
+function ProviderApplication({
+  me,
+  catalog,
+  location,
+  notify,
+  reload,
+  close,
+  go,
+  locations = defaultLocations,
+}) {
+  const [selected, setSelected] = useState([]),
+    [areas, setAreas] = useState([location]);
+  if (!me.phone)
+    return (
+      <>
+        <p>
+          First, add your name and Indian mobile number to your profile. Your
+          contact details are private.
+        </p>
+        <Button
+          onClick={() => {
+            close();
+            go("profile");
+          }}
+        >
+          Complete my profile <ArrowRight size={17} />
+        </Button>
+      </>
+    );
+  return (
+    <>
+      <p>
+        Tell us what you do best. Your application is reviewed before you
+        receive bookings.
+      </p>
+      <Form
+        submit="Submit for review"
+        onSubmit={async (d) => {
+          await api("/provider/register", {
+            ...d,
+            service_ids: selected,
+            locations: areas,
+            experience: Number(d.experience),
+          });
+          reload();
+          notify("Your provider application has been submitted for review.");
+          close();
+        }}
+      >
+        <div className="form-grid">
+          <Field label="Business name (optional)">
+            <input name="business_name" maxLength={100} />
+          </Field>
+          <Field label="Years of experience">
+            <input
+              type="number"
+              name="experience"
+              min="0"
+              max="70"
+              required
+              defaultValue="0"
+            />
+          </Field>
+        </div>
+        <Field label="Primary category">
+          <select name="category">
+            {categories.map((c) => (
+              <option key={c}>{c}</option>
+            ))}
+          </select>
+        </Field>
+        <fieldset>
+          <legend>Your services</legend>
+          <div className="checkbox-grid">
+            {catalog.map((s) => (
+              <label key={s.id}>
+                <input
+                  type="checkbox"
+                  checked={selected.includes(s.id)}
+                  onChange={(e) =>
+                    setSelected(
+                      e.target.checked
+                        ? [...selected, s.id]
+                        : selected.filter((x) => x !== s.id),
+                    )
+                  }
+                />
+                {s.name}
+              </label>
+            ))}
+          </div>
+        </fieldset>
+        <fieldset>
+          <legend>Where you work</legend>
+          <div className="checkbox-grid">
+            {locations.map((l) => (
+              <label key={l}>
+                <input
+                  type="checkbox"
+                  checked={areas.includes(l)}
+                  onChange={(e) =>
+                    setAreas(
+                      e.target.checked
+                        ? [...areas, l]
+                        : areas.filter((x) => x !== l),
+                    )
+                  }
+                />
+                {l}
+              </label>
+            ))}
+          </div>
+        </fieldset>
+        <Field label="Your skills, qualifications & experience">
+          <textarea
+            name="description"
+            required
+            rows={4}
+            maxLength={2000}
+            placeholder="Tell your neighbourhood a little about your work."
+          />
+        </Field>
+        <p className="muted-copy">
+          Identity and relevant qualifications must be reviewed separately
+          before approval. Please do not enter bank details or identity document
+          numbers here.
+        </p>
+      </Form>
+    </>
+  );
+}
+function BookingDetails({
+  id,
+  role,
+  me,
+  refresh,
+  reload,
+  notify,
+  open,
+  close,
+}) {
+  const [b, setB] = useState(null),
+    [error, setError] = useState(""),
+    [reschedule, setReschedule] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    const load = () =>
+      api("/bookings/" + id)
+        .then((d) => {
+          if (alive) setB(d);
+        })
+        .catch((e) => {
+          if (alive) setError(e.message);
+        });
+    load();
+    const timer = setInterval(load, 10000);
+    return () => {
+      alive = false;
+      clearInterval(timer);
+    };
+  }, [id, refresh]);
+  const action = async (path, data = {}) => {
+    try {
+      await api("/bookings/" + id + "/" + path, data);
+      reload();
+      notify("Your booking has been updated.");
+    } catch (e) {
+      setError(e.message);
+    }
+  };
+  if (!b) return error ? <p className="form-error">{error}</p> : <Loading />;
+  const customer = b.customer_id === me.id,
+    assigned = b.provider_id === me.id,
+    candidate =
+      role === "provider" &&
+      (!b.provider_id || (b.provider_id === me.id && !b.accepted_at));
+  const latest = b.quotes.find((q) => q.status === "pending");
+  return (
+    <>
+      <div className="booking-detail-heading">
+        <div>
+          <h3>{b.service_name}</h3>
+          <small>Reference {b.id.slice(0, 8).toUpperCase()}</small>
+        </div>
+        <Status value={b.request_expired ? "expired" : b.status} />
+      </div>
+      {error && <p className="form-error">{error}</p>}
+      <div className="detail-grid">
+        <span>
+          <CalendarDays size={16} />
+          When<strong>{date(b.scheduled_at)}</strong>
+        </span>
+        <span>
+          <MapPin size={16} />
+          Where
+          <strong>
+            {b.address}, {b.location}
+          </strong>
+        </span>
+        <span>
+          <Wallet size={16} />
+          Estimate
+          <strong>
+            {b.requires_quote && ["requested", "quote_sent"].includes(b.status)
+              ? "Awaiting total quotation"
+              : b.estimated_price
+                ? rupees(b.estimated_price)
+                : "Awaiting quote"}
+          </strong>
+        </span>
+        <span>
+          <CheckCircle2 size={16} />
+          Payment
+          <strong>
+            {title(b.payment_status)} · {title(b.payment_method)}
+          </strong>
+        </span>
+      </div>
+      <div className="booking-description">
+        <h3>A little about the job</h3>
+        <p>{b.description}</p>
+        {Object.entries(readRecord(b.details))
+          .filter(([k, v]) => v)
+          .map(([k, v]) => (
+            <p key={k}>
+              <strong>{title(k)}: </strong>
+              {typeof v === "object" ? JSON.stringify(v) : String(v)}
+            </p>
+          ))}
+      </div>
+      {latest && (
+        <div className="quote-card">
+          <h3>A quote for your consideration</h3>
+          <div>
+            <span>Labour</span>
+            <strong>{rupees(latest.labour)}</strong>
+          </div>
+          <div>
+            <span>Materials</span>
+            <strong>{rupees(latest.materials)}</strong>
+          </div>
+          <div>
+            <span>Other charges</span>
+            <strong>{rupees(latest.additional)}</strong>
+          </div>
+          <div className="quote-total">
+            <span>Total</span>
+            <strong>
+              {rupees(latest.labour + latest.materials + latest.additional)}
+            </strong>
+          </div>
+          <p>{latest.terms}</p>
+          {customer && (
+            <div className="actions">
+              <Button
+                onClick={() =>
+                  action("quote-response", {
+                    quote_id: latest.id,
+                    accept: true,
+                  })
+                }
+              >
+                Approve quotation <Check size={16} />
+              </Button>
+              <Button
+                secondary
+                onClick={() =>
+                  action("quote-response", {
+                    quote_id: latest.id,
+                    accept: false,
+                  })
+                }
+              >
+                Decline
+              </Button>
+            </div>
+          )}
+        </div>
+      )}
+      <div className="actions booking-actions">
+        {candidate && (
+          <>
+            {
+              <Button onClick={() => action("accept")}>
+                Accept request <Check size={16} />
+              </Button>
+            }
+            <button className="danger-link" onClick={() => action("reject")}>
+              Decline request
+            </button>
+          </>
+        )}
+        {assigned &&
+          b.accepted_at &&
+          ["requested", "confirmed"].includes(b.status) && (
+            <Button secondary onClick={() => open({ type: "quote", id })}>
+              Send quotation
+            </Button>
+          )}
+        {assigned &&
+          (workflow[b.status] || [])
+            .filter(
+              (s) =>
+                ![
+                  "cancelled",
+                  "disputed",
+                  "quote_sent",
+                  "confirmed",
+                  "work_started",
+                  "work_completed",
+                ].includes(s),
+            )
+            .map((s) => (
+              <Button key={s} onClick={() => action("status", { status: s })}>
+                {title(s)} <ArrowRight size={16} />
+              </Button>
+            ))}
+        {((b.provider_id && (customer || assigned)) || role === "admin") && (
+          <Button secondary onClick={() => open({ type: "chat", id })}>
+            <MessageSquare size={17} />
+            Messages
+          </Button>
+        )}
+        {customer && ["requested", "confirmed"].includes(b.status) && (
+          <Button secondary onClick={() => setReschedule(!reschedule)}>
+            <CalendarDays size={17} />
+            Reschedule
+          </Button>
+        )}
+        {customer && b.status === "work_completed" && (
+          <Button secondary onClick={() => open({ type: "review", id })}>
+            <Star size={17} />
+            Leave a review
+          </Button>
+        )}
+        {false && (
+          <Button
+            secondary
+            onClick={async () => {
+              const data = await api("/bookings/" + id + "/invoice");
+              const a = document.createElement("a"),
+                url = URL.createObjectURL(
+                  new Blob([JSON.stringify(data, null, 2)], {
+                    type: "application/json",
+                  }),
+                );
+              a.href = url;
+              a.download = "local-mate-summary-" + id.slice(0, 8) + ".json";
+              a.click();
+              setTimeout(() => URL.revokeObjectURL(url), 5000);
+            }}
+          >
+            <Download size={17} />
+            Service summary
+          </Button>
+        )}
+      </div>
+      {reschedule && (
+        <Form
+          submit="Confirm new time"
+          onSubmit={async (d) => {
+            await api("/bookings/" + id + "/reschedule", {
+              scheduled_at: new Date(
+                d.date + "T" + d.time + ":00+05:30",
+              ).toISOString(),
+            });
+            setReschedule(false);
+            reload();
+            notify("Booking rescheduled.");
+          }}
+        >
+          <div className="form-grid">
+            <Field label="New date">
+              <input type="date" name="date" required />
+            </Field>
+            <Field label="New time (IST)">
+              <input type="time" name="time" required />
+            </Field>
+          </div>
+        </Form>
+      )}
+      {(customer || assigned || role === "admin") && (
+        <>
+          <BookingContact booking={b} me={me} api={api} open={open} />
+          <BookingTracking booking={b} me={me} api={api} />
+          <BookingOperations
+            booking={b}
+            me={me}
+            api={api}
+            reload={reload}
+            notify={notify}
+            refresh={refresh}
+          />
+        </>
+      )}
+      <h3 className="mt">Every step, in the loop.</h3>
+      <div className="timeline">
+        {b.history.map((h, i) => (
+          <div key={i}>
+            <span />
+            <div>
+              <strong>{title(h.status)}</strong>
+              <small>{date(h.created_at)}</small>
+              {h.note && <p>{h.note}</p>}
+            </div>
+          </div>
+        ))}
+      </div>
+      {customer && b.request_expired && (
+        <Button
+          secondary
+          onClick={async () => {
+            await api("/bookings/" + id + "/retry", {});
+            reload();
+            notify("Request sent to all eligible providers again.");
+          }}
+        >
+          Retry booking request
+        </Button>
+      )}
+      {customer &&
+        [
+          "requested",
+          "quote_sent",
+          "confirmed",
+          "on_the_way",
+          "arrived",
+        ].includes(b.status) && (
+          <button
+            className="danger-link"
+            onClick={() =>
+              open({
+                type: "confirm",
+                heading: "Cancel this booking?",
+                description:
+                  "The provider will receive an in-app notification. Contact support for any payment or refund questions.",
+                action: async () => {
+                  await api("/bookings/" + id + "/status", {
+                    status: "cancelled",
+                  });
+                  reload();
+                  notify("Booking cancelled.");
+                },
+              })
+            }
+          >
+            Cancel booking
+          </button>
+        )}
+      {customer && ["work_started", "work_completed"].includes(b.status) && (
+        <Button
+          secondary
+          onClick={() => action("status", { status: "disputed" })}
+        >
+          Report a problem
+        </Button>
+      )}
+    </>
+  );
+}
+function Chat({ id, me }) {
+  const [messages, setMessages] = useState([]),
+    [error, setError] = useState(""),
+    [body, setBody] = useState(""),
+    [busy, setBusy] = useState(false),
+    end = React.useRef(null);
+  const load = () =>
+    api("/bookings/" + id + "/messages")
+      .then(setMessages)
+      .catch((e) => setError(e.message));
+  useEffect(() => {
+    load();
+    const timer = setInterval(load, 10000);
+    const client = getBrowserClient();
+    const channel = client
+      ?.channel("booking-" + id)
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "booking_events",
+          filter: "booking_id=eq." + id,
+        },
+        load,
+      )
+      .subscribe();
+    return () => {
+      clearInterval(timer);
+      if (channel) client.removeChannel(channel);
+    };
+  }, [id]);
+  useEffect(() => {
+    end.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }, [messages.length]);
+  return (
+    <>
+      <p className="muted-copy">
+        Private conversation for booking {id.slice(0, 8).toUpperCase()}.
+        Realtime updates with a 10-second refresh fallback.
+      </p>
+      {error && <p className="form-error">{error}</p>}
+      <label className="field">
+        <span>Attach a private image</span>
+        <input
+          type="file"
+          accept="image/jpeg,image/png,image/webp"
+          onChange={async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            try {
+              const asset_id = await upload(file, "chat", id);
+              await api("/bookings/" + id + "/attachment", { asset_id });
+              load();
+            } catch (e) {
+              setError(e.message);
+            }
+          }}
+        />
+      </label>
+      <div className="chat-messages">
+        {messages.length ? (
+          messages.map((m) => (
+            <div
+              className={
+                "chat-message " + (m.sender_id === me.id ? "mine" : "")
+              }
+              key={m.id}
+            >
+              <small>{m.sender_name}</small>
+              <p>{m.body}</p>
+              {m.attachment_id && (
+                <PrivateImage id={m.attachment_id} caption="Booking image" />
+              )}
+              <small>
+                {m.sender_id === me.id ? (m.is_read ? "Read" : "Sent") : ""}
+              </small>
+              <time>{date(m.created_at)}</time>
+            </div>
+          ))
+        ) : (
+          <Empty icon={MessageSquare} title="Say a little hello">
+            Start a conversation about the job. Please keep sensitive details
+            private.
+          </Empty>
+        )}
+        <div ref={end} />
+      </div>
+      <form
+        className="chat-compose"
+        onSubmit={async (e) => {
+          e.preventDefault();
+          if (!body.trim()) return;
+          setBusy(true);
+          try {
+            await api("/bookings/" + id + "/messages", { body });
+            setBody("");
+            load();
+          } catch (e) {
+            setError(e.message);
+          } finally {
+            setBusy(false);
+          }
+        }}
+      >
+        <input
+          value={body}
+          onChange={(e) => setBody(e.target.value)}
+          placeholder="Write a message…"
+          aria-label="Message"
+          required
+          maxLength={4000}
+        />
+        <button disabled={busy} aria-label="Send message">
+          <Send size={19} />
+        </button>
+      </form>
+    </>
+  );
+}
+function Notifications({ notify }) {
+  const [items, setItems] = useState(null),
+    [error, setError] = useState("");
+  useEffect(() => {
+    api("/notifications")
+      .then(setItems)
+      .catch((e) => setError(e.message));
+  }, []);
+  return (
+    <>
+      {error ? (
+        <p className="form-error">{error}</p>
+      ) : !items ? (
+        <Loading />
+      ) : items.length ? (
+        <>
+          <button
+            className="text-link"
+            onClick={async () => {
+              await api("/notifications", {});
+              setItems(items.map((n) => ({ ...n, is_read: 1 })));
+              notify("All updates marked as read.");
+            }}
+          >
+            Mark all as read <Check size={14} />
+          </button>
+          {items.map((n) => (
+            <div
+              className={"notification " + (!n.is_read ? "unread" : "")}
+              key={n.id}
+            >
+              <Bell size={19} />
+              <div>
+                <strong>{n.title}</strong>
+                <small>{date(n.created_at)}</small>
+              </div>
+            </div>
+          ))}
+        </>
+      ) : (
+        <Empty icon={Bell} title="All quiet in your corner">
+          Booking updates and new messages will appear here.
+        </Empty>
+      )}
+    </>
+  );
+}
+function Policy({ type, content = {} }) {
+  if (content[type + "_text"])
+    return (
+      <div className="policy">
+        <p style={{ whiteSpace: "pre-wrap" }}>{content[type + "_text"]}</p>
+      </div>
+    );
+  return (
+    <div className="policy">
+      {type === "privacy" ? (
+        <>
+          <p>
+            Local Mate collects your account username and profile details, the
+            contact details you choose to add, booking information, addresses,
+            messages, and support requests needed to coordinate services.
+          </p>
+          <h3>Who can see your information</h3>
+          <p>
+            Customers access their own records. Assigned providers access the
+            details needed for their jobs. Authorized administrators can review
+            relevant records to operate the marketplace and resolve disputes.
+            Provider and customer phone numbers are never shared with the other
+            participant. Use booking-specific chat and in-app voice calling.
+            Shared images require privacy review.
+          </p>
+          <h3>Payments and location</h3>
+          <p>
+            Card information is never stored by Local Mate. Online payment
+            processing requires an authorized gateway. Providers can choose to
+            share GPS for an assigned active job while its booking page is open.
+            Sharing stops on leaving or hiding the page, finishing the job or
+            choosing Stop. Only the booking customer, assigned provider and
+            authorized administrators can view recent positions; updates older
+            than two minutes are hidden. The latest position replaces the
+            previous one and is deleted when sharing stops or the job ends. Map
+            tiles are served by OpenStreetMap.
+          </p>
+          <h3>Your choices</h3>
+          <p>
+            You can edit contact details and saved addresses in your account.
+            Contact support for account or data requests.
+          </p>
+        </>
+      ) : type === "cancellation" ? (
+        <>
+          <p>
+            You can cancel a requested or confirmed booking before work begins
+            from My bookings. You can also reschedule a requested or confirmed
+            booking for a future time.
+          </p>
+          <p>
+            Once work has begun, contact support to review cancellation,
+            completed work and any agreed costs. No cancellation fee is
+            collected automatically by this version.
+          </p>
+          <h3>Refund requests</h3>
+          <p>
+            Raise a support ticket referencing your booking. Refunds are
+            reviewed against the actual payment record and agreed service terms.
+            A refund is not confirmed until processed through the payment
+            provider or reconciled by support.
+          </p>
+        </>
+      ) : (
+        <>
+          <p>
+            Local Mate helps customers request services from local
+            professionals. Availability is confirmed only when an approved
+            provider accepts a request or an administrator assigns it.
+          </p>
+          <h3>Bookings and quotations</h3>
+          <p>
+            Starting prices are estimates. Quotation-based jobs require customer
+            approval before work is confirmed. Additional charges must be agreed
+            before the related work begins.
+          </p>
+          <h3>Your responsibilities</h3>
+          <p>
+            Provide accurate details, safe access and respectful communication.
+            Providers must have appropriate qualifications, permissions and
+            insurance for the work they offer.
+          </p>
+          <h3>Emergency services</h3>
+          <p>
+            Local Mate does not guarantee emergency response. For immediate
+            danger, contact the appropriate emergency authority.
+          </p>
+        </>
+      )}
+      <div className="notice">
+        <AlertCircle size={20} />
+        <small>
+          Launch policy draft. The business owner must finalize legal identity,
+          contact details, retention periods and applicable terms before public
+          commercial launch.
+        </small>
+      </div>
+    </div>
+  );
+}
 
-
-function SignIn({notify,reload,close,go,registrationEnabled=true}){
- const [signup,setSignup]=useState(false);
- return <><p>{signup?'Create your Local Mate account with a username and password.':'Sign in with your Local Mate username and password.'}</p><div className="signin-art"><House size={45} strokeWidth={1.5}/><ShieldCheck size={22}/></div><Form key={String(signup)} submit={signup?'Create account':'Sign in'} onSubmit={async d=>{if(signup&&d.password!==d.confirm_password)throw new Error('The passwords do not match.');const result=await api(signup?'/auth/signup':'/auth/signin',d);reload();close();go(result.admin||result.must_change_password?'admin':'bookings');notify(result.must_change_password?'Signed in. Choose a new password to finish setup.':'You’re signed in. Welcome to Local Mate.');}}>{signup&&<Field label="Your name"><input name="name" autoComplete="name" required maxLength={100}/></Field>}<Field label="Username"><input name="username" autoComplete="username" required minLength={3} maxLength={32} placeholder="Your username"/></Field><Field label="Password"><input name="password" type="password" autoComplete={signup?'new-password':'current-password'} required minLength={8} maxLength={128}/></Field>{signup&&<Field label="Confirm password"><input name="confirm_password" type="password" autoComplete="new-password" required minLength={8} maxLength={128}/></Field>}</Form>{registrationEnabled&&<button className="text-link auth-switch" onClick={()=>setSignup(!signup)}>{signup?'Already have an account? Sign in':'New here? Create an account'}</button>}<small className="signin-note">Your password is checked securely. No email verification is required.<br/>For a forgotten password, contact the administrator.</small></>;
+function SignIn({ notify, reload, close, go, registrationEnabled = true }) {
+  const [signup, setSignup] = useState(false);
+  return (
+    <>
+      <p>
+        {signup
+          ? "Create your Local Mate account with a username and password."
+          : "Sign in with your Local Mate username and password."}
+      </p>
+      <div className="signin-art">
+        <House size={45} strokeWidth={1.5} />
+        <ShieldCheck size={22} />
+      </div>
+      <Form
+        key={String(signup)}
+        submit={signup ? "Create account" : "Sign in"}
+        onSubmit={async (d) => {
+          if (signup && d.password !== d.confirm_password)
+            throw new Error("The passwords do not match.");
+          const result = await api(signup ? "/auth/signup" : "/auth/signin", d);
+          reload();
+          close();
+          go(
+            result.admin || result.must_change_password ? "admin" : "bookings",
+          );
+          notify(
+            result.must_change_password
+              ? "Signed in. Choose a new password to finish setup."
+              : "You’re signed in. Welcome to Local Mate.",
+          );
+        }}
+      >
+        {signup && (
+          <Field label="Your name">
+            <input name="name" autoComplete="name" required maxLength={100} />
+          </Field>
+        )}
+        <Field label="Username">
+          <input
+            name="username"
+            autoComplete="username"
+            required
+            minLength={3}
+            maxLength={32}
+            placeholder="Your username"
+          />
+        </Field>
+        <Field label="Password">
+          <input
+            name="password"
+            type="password"
+            autoComplete={signup ? "new-password" : "current-password"}
+            required
+            minLength={8}
+            maxLength={128}
+          />
+        </Field>
+        {signup && (
+          <Field label="Confirm password">
+            <input
+              name="confirm_password"
+              type="password"
+              autoComplete="new-password"
+              required
+              minLength={8}
+              maxLength={128}
+            />
+          </Field>
+        )}
+      </Form>
+      {registrationEnabled && (
+        <button
+          className="text-link auth-switch"
+          onClick={() => setSignup(!signup)}
+        >
+          {signup
+            ? "Already have an account? Sign in"
+            : "New here? Create an account"}
+        </button>
+      )}
+      <small className="signin-note">
+        Your password is checked securely. No email verification is required.
+        <br />
+        For a forgotten password, contact the administrator.
+      </small>
+    </>
+  );
 }

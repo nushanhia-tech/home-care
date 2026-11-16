@@ -7,6 +7,18 @@ permissions:
 jobs:
   check:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_PASSWORD: local_test_only
+        ports:
+          - 15432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -17,6 +29,7 @@ jobs:
       - run: npm run typecheck
       - run: npm run db:setup:check
       - run: npm test
+      - run: npm run test:operations
       - run: npm run build
         env:
           NEXT_TELEMETRY_DISABLED: '1'
