@@ -1,6 +1,7 @@
 "use client";
 import React, { useState, useEffect, useRef } from "react";
 import dynamic from "next/dynamic";
+import { CallButton } from "./voice/provider";
 import {
   readArray,
   readStringArray,
@@ -109,23 +110,10 @@ export function ProviderRates({ provider: p, catalog = [] }) {
           </strong>
         </div>
       ))}
-      {p.phone && (
-        <a className="text-link" href={"tel:" + p.phone}>
-          <Phone size={15} />
-          {p.phone}
-        </a>
-      )}
     </div>
   );
 }
-export function ServiceProviders({
-  providers,
-  service,
-  location,
-  selected,
-  onSelect,
-  me,
-}) {
+export function ServiceProviders({ providers, service, location }) {
   const shown = providers.filter(
     (p) =>
       array(p.service_ids).includes(service.id) &&
@@ -134,58 +122,31 @@ export function ServiceProviders({
   return (
     <div className="service-provider-list">
       <h3>
-        {shown.length} service provider{shown.length === 1 ? "" : "s"} in{" "}
-        {location}
+        {shown.length} service providers in {location}
       </h3>
-      <p className="muted-copy">
-        Choose a professional to request their listed rate. Availability is
-        confirmed when they respond.
+      <p>
+        Your request is sent to all eligible approved providers. The first
+        provider whose acceptance is recorded gets the job. Contact stays inside
+        Local Mate.
       </p>
-      {shown.length === 0 && (
-        <p>No approved providers for this service and town yet.</p>
-      )}
       {shown.map((p) => {
-        const offer = array(p.offerings).find(
+        const offer = providerOffers(p.offerings).find(
           (o) => o.service_id === service.id,
         );
         return (
-          <div
-            className={
-              "service-provider-option " +
-              (selected === p.user_id ? "chosen" : "")
-            }
-            key={p.user_id}
-          >
-            <div className="panel-heading">
-              <strong>{p.business_name || p.name}</strong>
-              <span className={"status " + (p.online ? "active" : "inactive")}>
-                {p.online ? "Online" : "Offline"}
-              </span>
-            </div>
+          <div className="service-provider-option" key={p.user_id}>
+            <strong>{p.business_name || p.name}</strong>
             <Rating provider={p} />
-            <p className="offer-price">
+            <p>
               {offer && offer.pricing_unit !== "quote"
                 ? money(offer.price) + " / " + offer.pricing_unit
                 : "Quotation required"}
             </p>
-            {p.phone ? (
-              <a className="text-link" href={"tel:" + p.phone}>
-                <Phone size={14} />
-                {p.phone}
-              </a>
-            ) : (
-              <small>Phone shared with the customer after assignment.</small>
-            )}
-            <button
-              type="button"
-              className={
-                "button " + (selected === p.user_id ? "" : "secondary")
-              }
-              disabled={!p.online || p.user_id === me?.id}
-              onClick={() => onSelect(p.user_id)}
-            >
-              {selected === p.user_id ? "Selected" : "Choose provider"}
-            </button>
+            <small>
+              {p.online
+                ? "Available for eligible requests"
+                : "Currently unavailable"}
+            </small>
           </div>
         );
       })}
@@ -251,7 +212,7 @@ export function ProviderEditor({
             })),
             locations: areas,
             experience: Number(data.experience),
-            publish_phone: data.publish_phone === "on",
+            publish_phone: false,
             online: data.online === "on",
           });
           reload();
@@ -449,15 +410,10 @@ export function ProviderEditor({
             ))}
           </div>
         </fieldset>
-        <label className="checkbox-row">
-          <input
-            name="publish_phone"
-            type="checkbox"
-            defaultChecked={!!p.publish_phone}
-          />
-          Publish this contact number in the provider directory{" "}
-          {admin ? "(provider consent obtained)" : "(optional)"}
-        </label>
+        <p className="muted-copy">
+          Mobile numbers are private account details. Customers and providers
+          communicate through Local Mate chat and voice calling.
+        </p>
         {admin && (
           <>
             <div className="form-grid">
@@ -658,31 +614,21 @@ export function BookingContact({ booking: b, me, api, open }) {
     me.id === b.provider_id ? contacts?.customer : contacts?.provider;
   return (
     <div className="booking-contact">
-      <h3>Contact for this booking</h3>
+      <h3>Contact through Local Mate</h3>
       {error && <p className="form-error">{error}</p>}
-      {other ? (
-        <>
-          <strong>{other.name}</strong>
-          <div className="actions">
-            {other.phone ? (
-              <a className="button secondary" href={"tel:" + other.phone}>
-                <Phone size={16} />
-                {other.phone}
-              </a>
-            ) : (
-              <small>No phone number added.</small>
-            )}
-            <button
-              className="button secondary"
-              onClick={() => open({ type: "chat", id: b.id })}
-            >
-              <MessageSquare size={16} />
-              Send message
-            </button>
-          </div>
-        </>
-      ) : (
-        <p>Contact details appear after a provider is assigned.</p>
+      {other && <strong>{other.name}</strong>}
+      <p>Personal phone numbers are never shared with the other participant.</p>
+      {b.provider_id && (
+        <div className="actions">
+          <button
+            className="button secondary"
+            onClick={() => open({ type: "chat", id: b.id })}
+          >
+            <MessageSquare size={16} />
+            In-app chat
+          </button>
+          <CallButton booking={b} me={me} />
+        </div>
       )}
     </div>
   );
