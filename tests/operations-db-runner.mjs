@@ -44,9 +44,38 @@ try{
  await scalar(pool,'customer','respond_final_bill',[bill,'dispute','Customer disputes the previously approved extra amount']);
  await scalar(pool,'service','service_maintenance');assert.equal((await scalar(pool,winner,'commission_dashboard')).current_commission_blocked,false);check.push('legitimate disputed commission is held and cannot suspend eligibility');
  await assert.rejects(scalar(pool,'other','booking_detail',[id]),/unavailable|access/);await assert.rejects(scalar(pool,'p5','conversation_messages',[id]),/conversation/);check.push('unrelated users cannot access booking data or messages');
+ // Quote rejection reopens the same request without a stale assignment.
+ const quoted=await scalar(pool,'customer','create_booking',[booking({service_id:'painting'})]);
+ await scalar(pool,'p5','accept_booking',[quoted]);
+ const quote=await scalar(pool,'p5','booking_action',[quoted,'quote',{labour:700,materials:100,additional:0,terms:'Actual painting scope for the test.'}]);
+ await scalar(pool,'customer','booking_action',[quoted,'quote-response',{quote_id:quote.id,accept:false}]);
+ assert.equal((await pool.query('select * from public.booking_assignments where booking_id=$1',[quoted])).rowCount,0);
+ assert.equal((await scalar(pool,'p1','accept_booking',[quoted])).ok,true);check.push('declined quote reopens broadcast and allows exactly one fresh assignment');
+ // Refund verification can only reflect real paid funds and holds commission.
+ await scalar(pool,'admin','admin_verify_cash',[second,1000000,'TEST-verified-cash-payment']);
+ await assert.rejects(scalar(pool,'other','admin_verify_refund',[second,100,'TEST-no-access','Actual refund reason']),/Administrator/);
+ await assert.rejects(scalar(pool,'admin','admin_verify_refund',[second,1000001,'TEST-too-large','Actual refund reason']),/actual paid/);
+ await scalar(pool,'admin','admin_verify_refund',[second,1000000,'TEST-actual-full-refund','Actual cash refund reconciled for this test']);
+ assert.equal((await scalar(pool,'customer','booking_detail',[second])).payment_status,'refunded');
+ assert.equal((await pool.query('select status from public.provider_commissions where booking_id=$1',[second])).rows[0].status,'held');check.push('verified refunds are bounded by actual payment and hold commission');
+ // Exercise the destructive reset only inside a rolled-back local test transaction.
+ const resetClient=await pool.connect();
+ try {
+  await resetClient.query('BEGIN');await resetClient.query('SET LOCAL ROLE service_role');
+  await resetClient.query("select set_config('request.jwt.claim.role','service_role',true)");
+  await resetClient.query("select public.service_reset_marketplace($1,'DELETE ALL DATA')",[ids.admin]);
+  await resetClient.query('RESET ROLE');
+  assert.equal((await resetClient.query('select count(*)::int n from public.bookings')).rows[0].n,0);
+  assert.equal((await resetClient.query('select is_active from public.users where id=$1',[ids.admin])).rows[0].is_active,true);
+  check.push('full financial-data reset preserves administrator and runs transactionally');
+ }finally{await resetClient.query('ROLLBACK');resetClient.release()}
  // Prepare an accepted live booking for the actual HTTP/WebRTC browser test.
  const live=await scalar(pool,'customer','create_booking',[booking()]);await scalar(pool,'p1','accept_booking',[live]);
  await scalar(pool,'admin','admin_operations_config',[{calling_enabled:true,relay_only:false}]);
+ const unanswered=await scalar(pool,'customer','start_voice_call',[live]);
+ await pool.query("update public.voice_calls set created_at=now()-interval '2 minutes' where id=$1",[unanswered.id]);
+ assert.equal((await scalar(pool,'p1','voice_call_state',[unanswered.id])).status,'missed');
+ assert.ok((await call(pool,'p1','safe_notifications')).some(n=>n.booking_id===live));check.push('unanswered calls expire as missed with persisted metadata/notification');
  await pool.query("notify pgrst,'reload schema'");
  console.log(JSON.stringify({passed:check,live_booking:live,live_provider:ids.p1},null,2));
 }catch(e){console.error('FAILED AFTER',check,e);process.exitCode=1}finally{await pool.end()}

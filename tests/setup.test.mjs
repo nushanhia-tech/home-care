@@ -32,7 +32,7 @@ test('single-file Supabase setup installs fresh, backfills accounts, and can rer
   await run(db,setup);
   assert.equal((await db.query("select price from public.services where id='plumbing'")).rows[0].price,350);
   assert.equal((await db.query('select count(*) n from private.admin_emails')).rows[0].n,1);
-  assert.equal((await db.query("select count(*) n from pg_publication_tables where pubname='supabase_realtime'")).rows[0].n,2);
+  assert.equal((await db.query("select count(*) n from pg_publication_tables where pubname='supabase_realtime'")).rows[0].n,4);
   assert.equal((await db.query("select count(*) n from pg_trigger where tgname='on_auth_user_created'")).rows[0].n,1);
  }finally{await db.close()}
 });

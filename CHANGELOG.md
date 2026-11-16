@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.5.0 — 2026-11-16
+
+- Broadcast requests to all eligible providers with row-locked, single-winner acceptance and assignment history. Reopen declined quotations safely.
+- Remove counterpart phone numbers from public/participant responses and raw database access; add private image uploads, re-encoding and administrator privacy review.
+- Require server-generated, hashed/encrypted, expiring work-start OTP verification; add audited administrator exceptions.
+- Add approved extra charges, exact final billing, customer confirmation/disputes, real PDF invoices and verified payment/refund records.
+- Add weekly commission snapshots, provider/category overrides, payment proof submission, explicit admin verification and earned-overdue-only new-job restrictions/reactivation. Zero-job providers remain eligible.
+- Add real booking-authorized WebRTC audio, incoming call controls, mute/output selection, duration/history, secure signalling and temporary Coturn credentials. No audio recording.
+- Expand all three portals, audit/backup coverage, maintenance scheduling and production Coturn guidance.
+- Verify unit/database checks, real PostgreSQL concurrency and actual Chromium media transport. Hosted SQL application, production TURN/TLS and external-network checks remain required deployment steps.
+
 ## 0.4.2 — 2026-11-15
 
 - Fix administrator tab request races: Providers only renders results belonging to its current account, tab and refresh, and ignores delayed responses from other screens.

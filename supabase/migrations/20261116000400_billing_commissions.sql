@@ -3,7 +3,7 @@ declare bill public.job_bills;b public.bookings;cfg jsonb:=private.ops();rate nu
 begin
  select * into bill from public.job_bills where id=p_bill;
  select * into b from public.bookings where id=bill.booking_id;
- if bill.status<>'confirmed' or b.status<>'work_completed' or not(cfg->>'commission_enabled')::boolean then return;end if;
+ if bill.status<>'confirmed' or b.status<>'work_completed' or b.payment_status in ('refunded','partially_refunded') or not(cfg->>'commission_enabled')::boolean then return;end if;
  if exists(select 1 from public.provider_commissions where booking_id=b.id and status<>'void') then return;end if;
  rate:=(cfg->>'commission_percent')::numeric;fixed:=(cfg->>'commission_fixed_paise')::bigint;
  select * into r from public.provider_commission_rules where provider_id=b.provider_id and active;
@@ -108,6 +108,7 @@ begin
  if length(trim(p_reason)) not between 10 and 2000 then raise exception 'Record the verified resolution and its reason.';end if;
  select * into bill from public.job_bills where id=p_bill for update;select * into b from public.bookings where id=bill.booking_id for update;
  if p_action='confirm' then
+  if b.payment_status in ('refunded','partially_refunded') then raise exception 'Reconcile the actual refund and void or correct the bill; refunded commission remains held.';end if;
   if exists(select 1 from public.invoices where bill_id=bill.id) then
    update public.job_bills set status='confirmed' where id=bill.id;update public.bookings set status='work_completed' where id=b.id;update public.provider_commissions set status='due' where booking_id=b.id and status='held';
   else perform private.confirm_bill(bill.id,auth.uid());end if;

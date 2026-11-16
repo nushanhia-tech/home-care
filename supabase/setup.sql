@@ -1358,7 +1358,7 @@ do $$ begin
  end if;
 end $$;
 create or replace function public.booking_action(p_booking uuid,p_action text,p_data jsonb default '{}') returns jsonb language plpgsql security definer set search_path='' as $$
-declare b public.bookings;
+declare b public.bookings;result jsonb;candidate uuid;
 begin
  if p_action='accept' then return public.accept_booking(p_booking);end if;
  if not public.account_active() then raise exception 'Sign in.' using errcode='42501';end if;
@@ -1372,7 +1372,19 @@ begin
   if b.provider_id is not null or not exists(select 1 from public.booking_provider_offers where booking_id=b.id and provider_id=auth.uid() and status='pending') then raise exception 'This request is no longer available.';end if;
   update public.booking_provider_offers set status='rejected',responded_at=now() where booking_id=b.id and provider_id=auth.uid();return jsonb_build_object('ok',true);
  end if;
- return private.legacy_booking_action(p_booking,p_action,p_data);
+ result:=private.legacy_booking_action(p_booking,p_action,p_data);
+ if p_action='quote-response' and not (p_data->>'accept')::boolean then
+  delete from public.booking_assignments where booking_id=b.id;
+  insert into public.booking_assignment_history(booking_id,provider_id,actor_id,event) values(b.id,b.provider_id,auth.uid(),'quote_declined');
+  update public.bookings set accepted_at=null,request_expired=false,request_expires_at=case when (private.ops()->>'request_timeout_minutes')::int>0 then now()+make_interval(mins=>(private.ops()->>'request_timeout_minutes')::int) else null end where id=b.id;
+  update public.booking_provider_offers set status='rejected',responded_at=now() where booking_id=b.id and provider_id=b.provider_id;
+  for candidate in select user_id from public.provider_profiles where user_id<>b.customer_id and user_id<>b.provider_id and public.provider_eligible(user_id,b.service_id,b.location) loop
+   insert into public.booking_provider_offers(booking_id,provider_id) values(b.id,candidate) on conflict(booking_id,provider_id) do update set status='pending',offered_at=now(),responded_at=null;
+   perform private.notify(candidate,'A Local Mate request is available again',b.id);
+  end loop;
+  insert into public.booking_events(booking_id,kind) values(b.id,'request_reopened');
+ end if;
+ return result;
 end $$;
 create or replace function private.work_verification_guard() returns trigger language plpgsql security definer set search_path='' as $$
 begin
@@ -1389,7 +1401,7 @@ begin
  if not public.can_view_booking(p_booking) then raise exception 'Booking not found or unavailable to your account.' using errcode='42501';end if;
  select * into b from public.bookings where id=p_booking;
  full_access:=public.is_admin() or b.customer_id=auth.uid() or(b.provider_id=auth.uid() and b.accepted_at is not null);
- result:=jsonb_build_object('id',b.id,'booking_reference',upper(left(b.id::text,8)),'service_id',b.service_id,'service_name',(select name from public.services where id=b.service_id),'service_type',(select type from public.services where id=b.service_id),'service_category',(select category from public.services where id=b.service_id),'provider_id',b.provider_id,'status',b.status,'request_expired',b.request_expired,'request_expires_at',b.request_expires_at,'scheduled_at',b.scheduled_at,'accepted_at',b.accepted_at,'location',b.location,'description',private.safe_text(b.description),'requires_quote',b.requires_quote,'estimated_price',b.estimated_price,'payment_status',b.payment_status,'payment_method',b.payment_method,'created_at',b.created_at,
+ result:=jsonb_build_object('id',b.id,'booking_reference',upper(left(b.id::text,8)),'service_id',b.service_id,'service_name',(select name from public.services where id=b.service_id),'service_type',(select type from public.services where id=b.service_id),'service_category',(select category from public.services where id=b.service_id),'provider_id',b.provider_id,'status',b.status,'request_expired',(b.request_expired or(private.ops()->>'request_expiry_mode'='expire' and b.request_expires_at<now())),'request_expires_at',b.request_expires_at,'scheduled_at',b.scheduled_at,'accepted_at',b.accepted_at,'location',b.location,'description',private.safe_text(b.description),'requires_quote',b.requires_quote,'estimated_price',b.estimated_price,'payment_status',b.payment_status,'payment_method',b.payment_method,'created_at',b.created_at,
  'provider_name',(select private.safe_text(coalesce(nullif(p.business_name,''),u.name)) from public.provider_profiles p join public.users u on u.id=p.user_id where p.user_id=b.provider_id),'provider_logo_id',(select logo_id from public.provider_profiles where user_id=b.provider_id),'customer_name','Customer · '||upper(left(b.id::text,8)));
  if full_access then result:=result||jsonb_build_object('customer_id',b.customer_id,'address',private.safe_text(b.address),'latitude',b.latitude,'longitude',b.longitude,'destination_latitude',b.destination_latitude,'destination_longitude',b.destination_longitude,'details',private.safe_json(b.details));else result:=result||jsonb_build_object('address','Exact address available after acceptance','details','{}'::jsonb);end if;
  return result;
@@ -1494,7 +1506,7 @@ declare bill public.job_bills;b public.bookings;cfg jsonb:=private.ops();rate nu
 begin
  select * into bill from public.job_bills where id=p_bill;
  select * into b from public.bookings where id=bill.booking_id;
- if bill.status<>'confirmed' or b.status<>'work_completed' or not(cfg->>'commission_enabled')::boolean then return;end if;
+ if bill.status<>'confirmed' or b.status<>'work_completed' or b.payment_status in ('refunded','partially_refunded') or not(cfg->>'commission_enabled')::boolean then return;end if;
  if exists(select 1 from public.provider_commissions where booking_id=b.id and status<>'void') then return;end if;
  rate:=(cfg->>'commission_percent')::numeric;fixed:=(cfg->>'commission_fixed_paise')::bigint;
  select * into r from public.provider_commission_rules where provider_id=b.provider_id and active;
@@ -1599,6 +1611,7 @@ begin
  if length(trim(p_reason)) not between 10 and 2000 then raise exception 'Record the verified resolution and its reason.';end if;
  select * into bill from public.job_bills where id=p_bill for update;select * into b from public.bookings where id=bill.booking_id for update;
  if p_action='confirm' then
+  if b.payment_status in ('refunded','partially_refunded') then raise exception 'Reconcile the actual refund and void or correct the bill; refunded commission remains held.';end if;
   if exists(select 1 from public.invoices where bill_id=bill.id) then
    update public.job_bills set status='confirmed' where id=bill.id;update public.bookings set status='work_completed' where id=b.id;update public.provider_commissions set status='due' where booking_id=b.id and status='held';
   else perform private.confirm_bill(bill.id,auth.uid());end if;
@@ -1718,8 +1731,8 @@ begin
 end $$;
 create or replace function private.voice_dto(p_call uuid) returns jsonb language sql stable security definer set search_path='' as $$
  select jsonb_build_object('id',c.id,'booking_id',c.booking_id,'booking_reference',upper(left(c.booking_id::text,8)),'caller_id',c.caller_id,'callee_id',c.callee_id,
- 'caller_name',case when c.caller_id=b.customer_id then 'Customer · '||upper(left(b.id::text,8)) else private.safe_text(coalesce(nullif(p.business_name,''),'Service provider')) end,
- 'callee_name',case when c.callee_id=b.customer_id then 'Customer · '||upper(left(b.id::text,8)) else private.safe_text(coalesce(nullif(p.business_name,''),'Service provider')) end,
+ 'caller_name',case when c.caller_id=b.customer_id then coalesce(nullif(private.safe_text((select name from public.users where id=b.customer_id)),''),'Customer · '||upper(left(b.id::text,8))) else private.safe_text(coalesce(nullif(p.business_name,''),'Service provider')) end,
+ 'callee_name',case when c.callee_id=b.customer_id then coalesce(nullif(private.safe_text((select name from public.users where id=b.customer_id)),''),'Customer · '||upper(left(b.id::text,8))) else private.safe_text(coalesce(nullif(p.business_name,''),'Service provider')) end,
  'status',c.status,'created_at',c.created_at,'accepted_at',c.accepted_at,'connected_at',c.connected_at,'ended_at',c.ended_at,'ended_reason',c.ended_reason,
  'duration_seconds',case when c.connected_at is not null then greatest(0,floor(extract(epoch from(coalesce(c.ended_at,now())-c.connected_at)))) else 0 end)
  from public.voice_calls c join public.bookings b on b.id=c.booking_id left join public.provider_profiles p on p.user_id=b.provider_id where c.id=p_call
@@ -1875,6 +1888,7 @@ begin
  if a.id is null then raise exception 'Image not found.';end if;
  update public.media_assets set review_status=case when p_approve then 'approved' else 'rejected' end,review_note=p_note where id=a.id;
  if p_approve and a.kind='logo' then update public.provider_profiles set logo_id=a.id where user_id=a.owner_id;end if;
+ if a.booking_id is not null then insert into public.booking_events(booking_id,kind) values(a.booking_id,'media_reviewed');end if;
  perform private.audit('Image privacy review',a.id::text);perform private.notify(a.owner_id,'Image privacy review: '||case when p_approve then 'approved' else 'rejected' end,a.booking_id);
 end $$;
 create or replace function public.send_attachment(p_booking uuid,p_asset uuid,p_body text default 'Image attachment') returns bigint language plpgsql security definer set search_path='' as $$
@@ -2023,7 +2037,7 @@ create or replace function public.export_marketplace() returns jsonb language pl
 declare t text;data jsonb;all_data jsonb:='{}';
 begin
  perform private.take_rate_limit();if not public.is_admin() then raise exception 'Administrator access required.' using errcode='42501';end if;
- foreach t in array array['users','provider_profiles','provider_offerings','locations','services','addresses','bookings','booking_status_history','booking_rejections','quotations','messages','notifications','reviews','payments','support_tickets','favourites','settings','website_configuration','admin_activity_logs','operations_configuration','booking_provider_offers','booking_assignments','booking_assignment_history','message_reads','media_assets','job_start_verifications','job_start_otp_logs','booking_charge_requests','job_bills','job_completion_records','invoices','invoice_items','provider_commission_rules','provider_commissions','weekly_commission_periods','provider_commission_payments','provider_suspension_records','provider_reactivation_records','provider_account_status_history','financial_audit_logs','cash_payment_verifications','voice_calls'] loop
+ foreach t in array array['users','provider_profiles','provider_offerings','locations','services','addresses','bookings','booking_status_history','booking_rejections','quotations','messages','notifications','reviews','payments','support_tickets','favourites','settings','website_configuration','admin_activity_logs','operations_configuration','booking_provider_offers','booking_assignments','booking_assignment_history','message_reads','media_assets','job_start_verifications','job_start_otp_logs','booking_charge_requests','job_bills','job_completion_records','invoices','invoice_items','provider_commission_rules','provider_commissions','weekly_commission_periods','provider_commission_payments','provider_suspension_records','provider_reactivation_records','provider_account_status_history','financial_audit_logs','cash_payment_verifications','payment_refund_verifications','voice_calls'] loop
   execute format('select coalesce(jsonb_agg(to_jsonb(x)),''[]''::jsonb) from public.%I x',t) into data;all_data:=all_data||jsonb_build_object(t,data);
  end loop;
  perform private.audit('Download complete application backup');return jsonb_build_object('format','local-mate-application-backup','version',3,'created_at',now(),'tables',all_data,'scope','Application records and call metadata only. No Auth passwords, OTP secrets, call signals/audio, GPS points or private image bytes.');
@@ -2057,7 +2071,7 @@ begin
  if auth.role()<>'service_role' or not exists(select 1 from auth.users u join private.admin_emails a on a.email=lower(u.email) join public.users p on p.id=u.id where u.id=p_actor and p.is_active and u.email_confirmed_at is not null and not exists(select 1 from private.login_accounts l where l.user_id=p_actor and l.must_change_password)) then raise exception 'Server administrator authorization required.' using errcode='42501';end if;
  if p_confirmation<>'DELETE ALL DATA' then raise exception 'Type DELETE ALL DATA to confirm.';end if;
  delete from public.voice_calls;delete from public.provider_commission_payments;delete from public.provider_commissions;delete from public.invoices;delete from public.job_bills;
- delete from public.cash_payment_verifications;delete from public.job_completion_records;delete from public.job_start_otp_logs;delete from public.job_start_verifications;delete from private.job_start_otps;delete from public.booking_charge_requests;
+ delete from public.payment_refund_verifications;delete from public.cash_payment_verifications;delete from public.job_completion_records;delete from public.job_start_otp_logs;delete from public.job_start_verifications;delete from private.job_start_otps;delete from public.booking_charge_requests;
  delete from public.provider_reactivation_records;delete from public.provider_suspension_records;delete from public.provider_account_status_history;delete from public.provider_commission_rules;delete from public.weekly_commission_periods;
  update public.provider_profiles set logo_id=null;delete from public.media_assets;delete from public.financial_audit_logs;delete from public.message_reads;delete from public.booking_provider_offers;delete from public.booking_assignments;delete from public.booking_assignment_history;delete from public.booking_events;
  perform private.legacy_reset_marketplace(p_actor,p_confirmation);
@@ -2072,6 +2086,43 @@ end $$;
 revoke execute on function public.service_reset_marketplace(uuid,text) from public,anon,authenticated;grant execute on function public.service_reset_marketplace(uuid,text) to service_role;
 revoke execute on all functions in schema private from public,anon,authenticated;
 notify pgrst,'reload schema';
+
+-- Migration: 20261116000900_session_refund_and_upload_guards.sql
+create or replace function public.end_my_voice_calls() returns void language plpgsql security definer set search_path='' as $$
+declare c public.voice_calls;
+begin
+ if auth.uid() is null then raise exception 'Sign in.' using errcode='42501';end if;
+ for c in select * from public.voice_calls where auth.uid() in(caller_id,callee_id) and status in ('ringing','accepted','active') for update loop perform private.finish_call(c.id,'ended','session_ended');end loop;
+end $$;
+create or replace function public.authorize_upload(p_kind text,p_booking uuid default null) returns void language plpgsql security definer set search_path='' as $$
+begin
+ perform private.take_rate_limit();
+ if p_kind in ('booking','chat','before','after') then
+  if not public.can_message_booking(p_booking) then raise exception 'Only booking participants can upload here.' using errcode='42501';end if;
+  if p_kind='booking' and not exists(select 1 from public.bookings where id=p_booking and customer_id=auth.uid()) then raise exception 'Only the customer can upload request photos.';end if;
+ elsif p_kind in ('commission','logo') then
+  if not exists(select 1 from public.provider_profiles where user_id=auth.uid()) then raise exception 'Provider account required.';end if;
+ else raise exception 'Unsupported image purpose.';end if;
+end $$;
+create table if not exists public.payment_refund_verifications(id uuid primary key default gen_random_uuid(),booking_id uuid not null references public.bookings(id) on delete cascade,amount_paise bigint not null check(amount_paise>0),reference text not null unique,reason text not null,verified_by uuid not null references public.users(id),verified_at timestamptz not null default now());
+alter table public.payment_refund_verifications enable row level security;revoke all on public.payment_refund_verifications from anon,authenticated;
+create or replace function public.admin_verify_refund(p_booking uuid,p_amount bigint,p_reference text,p_reason text) returns void language plpgsql security definer set search_path='' as $$
+declare paid bigint;refunded bigint;
+begin
+ perform private.take_rate_limit();if not public.is_admin() then raise exception 'Administrator access required.' using errcode='42501';end if;
+ perform 1 from public.bookings where id=p_booking for update;
+ select coalesce((select amount_paise from public.cash_payment_verifications where booking_id=p_booking),0)+coalesce((select amount_paise from public.payments where booking_id=p_booking and status in ('successful','refunded','partially_refunded')),0) into paid;
+ select coalesce(sum(amount_paise),0) into refunded from public.payment_refund_verifications where booking_id=p_booking;
+ if p_amount is null or p_amount<=0 or p_amount+refunded>paid or length(trim(p_reference))<5 or length(trim(p_reason))<10 then raise exception 'Record a verified refund within the actual paid amount, with reference and reason.';end if;
+ insert into public.payment_refund_verifications(booking_id,amount_paise,reference,reason,verified_by) values(p_booking,p_amount,p_reference,p_reason,auth.uid());
+ update public.bookings set payment_status=case when p_amount+refunded=paid then 'refunded' else 'partially_refunded' end where id=p_booking;
+ update public.payments set status=case when p_amount+refunded=paid then 'refunded' else 'partially_refunded' end where booking_id=p_booking;
+ perform private.financial_audit('Record verified refund',p_booking,jsonb_build_object('amount_paise',p_amount,'reference',p_reference,'reason',p_reason));
+ perform private.reconcile_provider((select provider_id from public.bookings where id=p_booking));
+end $$;
+revoke execute on function public.end_my_voice_calls(),public.authorize_upload(text,uuid),public.admin_verify_refund(uuid,bigint,text,text) from public,anon;
+grant execute on function public.end_my_voice_calls(),public.authorize_upload(text,uuid),public.admin_verify_refund(uuid,bigint,text,text) to authenticated;
+revoke execute on all functions in schema private from public,anon,authenticated;
 
 
 -- Initial supported towns and editable services. Existing catalogue edits are preserved.

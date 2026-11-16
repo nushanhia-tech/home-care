@@ -2708,6 +2708,7 @@ function ServiceBooking({
     [addresses, setAddresses] = useState([]),
     [selected, setSelected] = useState(""),
     [point, setPoint] = useState(null);
+  const [requestPhotos, setRequestPhotos] = useState([]);
   const [idem] = useState(() => crypto.randomUUID());
   useEffect(() => {
     if (me)
@@ -2808,7 +2809,7 @@ function ServiceBooking({
             s.type === "quote" ? "Request a quotation" : "Send booking request"
           }
           onSubmit={async (d) => {
-            await api("/bookings", {
+            const created = await api("/bookings", {
               service_id: s.id,
               latitude: d.latitude,
               longitude: d.longitude,
@@ -2835,13 +2836,17 @@ function ServiceBooking({
                 quantity: d.quantity,
                 delivery: d.delivery,
                 measurements: d.measurements,
-                contact: d.contact,
               },
             });
+            const failedPhotos = [];
+            for (const photo of requestPhotos) {
+              try { await upload(photo, "booking", created.id); }
+              catch (error) { failedPhotos.push(error.message); }
+            }
             reload();
-            notify(
-              "Your request has been created. We’ll update you when a provider responds.",
-            );
+            notify(failedPhotos.length
+              ? "Booking created. Some photos failed to upload; open your booking to retry. " + failedPhotos[0]
+              : "Your request was sent to all eligible providers. Photos appear after privacy review.");
             close();
           }}
         >
@@ -3002,17 +3007,6 @@ function ServiceBooking({
               />
             </Field>
           )}
-          {s.type === "emergency" && (
-            <Field label="Contact mobile">
-              <input
-                type="tel"
-                name="contact"
-                placeholder="+919876543210"
-                required
-                pattern="(\+91)?[6-9][0-9]{9}"
-              />
-            </Field>
-          )}
           <Field
             label={
               s.type === "quote"
@@ -3036,9 +3030,13 @@ function ServiceBooking({
             </div>
             <CheckCircle2 size={19} />
           </div>
+          <Field label="Work photos (optional, up to 5)">
+            <input type="file" accept="image/jpeg,image/png,image/webp" multiple
+              onChange={(event) => setRequestPhotos(Array.from(event.target.files || []).slice(0, 5))} />
+          </Field>
           <small className="muted-copy">
-            Photos and documents can be shared through support once secure
-            storage is configured. No payment is collected at this step.
+            Images are private until an administrator reviews them. Do not include phone numbers.
+            No payment is collected at this step.
           </small>
         </Form>
       )}

@@ -223,6 +223,8 @@ async function route(req: NextRequest) {
   if (authError || !user)
     throw new ApiError("Please sign in to continue.", 401);
   if (p === "/auth/signout" && method === "POST") {
+    const ended = await supabase.rpc("end_my_voice_calls");
+    if (ended.error && ended.error.code !== "PGRST202") throw ended.error;
     const { error } = await supabase.auth.signOut();
     if (error) throw error;
     return json({ ok: true });

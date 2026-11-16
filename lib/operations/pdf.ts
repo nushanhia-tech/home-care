@@ -1,3 +1,4 @@
+import "regenerator-runtime/runtime.js";
 import { PDFDocument, rgb } from "pdf-lib";
 import fontkit from "@pdf-lib/fontkit";
 import { readFile } from "node:fs/promises";
@@ -9,34 +10,57 @@ export async function invoicePDF(record: any) {
     path.join(process.cwd(), "assets/fonts/NotoSans-Regular.ttf"),
   );
   const font = await pdf.embedFont(bytes, { subset: true });
+  const malayalam = await pdf.embedFont(
+    await readFile(
+      path.join(process.cwd(), "assets/fonts/NotoSansMalayalam-Regular.ttf"),
+    ),
+    { subset: true },
+  );
+  const runs = (text: string) => {
+    const values: { text: string; font: typeof font }[] = [];
+    for (const ch of text) {
+      const selected =
+        /[\u0D00-\u0D7F]/.test(ch) ||
+        (/[\u200C\u200D]/.test(ch) && values.at(-1)?.font === malayalam)
+          ? malayalam
+          : font;
+      const last = values.at(-1);
+      if (last?.font === selected) last.text += ch;
+      else values.push({ text: ch, font: selected });
+    }
+    return values;
+  };
+  const width = (text: string, size: number) =>
+    runs(text).reduce(
+      (sum, r) => sum + r.font.widthOfTextAtSize(r.text, size),
+      0,
+    );
   let page = pdf.addPage([595, 842]),
     y = 790;
   const write = (text: string, size = 11, color = rgb(0.1, 0.18, 0.28)) => {
-    const safe = String(text || "").replace(/[\r\n]+/g, " ");
-    const words = safe.split(" ");
-    let line = "";
-    for (const word of words) {
-      if (
-        font.widthOfTextAtSize((line ? line + " " : "") + word, size) > 490 &&
-        line
-      ) {
-        if (y < 60) {
-          page = pdf.addPage([595, 842]);
-          y = 790;
-        }
-        page.drawText(line, { x: 50, y, size, font, color });
-        y -= size + 7;
-        line = word;
-      } else line += (line ? " " : "") + word;
-    }
-    if (line) {
+    const draw = (line: string) => {
       if (y < 60) {
         page = pdf.addPage([595, 842]);
         y = 790;
       }
-      page.drawText(line, { x: 50, y, size, font, color });
-      y -= size + 9;
+      let x = 50;
+      for (const run of runs(line)) {
+        page.drawText(run.text, { x, y, size, font: run.font, color });
+        x += run.font.widthOfTextAtSize(run.text, size);
+      }
+      y -= size + 8;
+    };
+    const words = String(text || "")
+      .replace(/[\r\n]+/g, " ")
+      .split(" ");
+    let line = "";
+    for (const word of words) {
+      if (width((line ? line + " " : "") + word, size) > 490 && line) {
+        draw(line);
+        line = word;
+      } else line += (line ? " " : "") + word;
     }
+    if (line) draw(line);
   };
   const data = record.snapshot;
   page.drawRectangle({

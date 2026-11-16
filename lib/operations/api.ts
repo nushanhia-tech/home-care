@@ -141,7 +141,7 @@ export async function operationsAPI(
     return json({ ok: true });
   }
   const booking = path.match(
-    /^\/bookings\/([^/]+)\/(finances|charges|bill|start-otp|verify-otp|otp-exception|retry|cash|attachment)$/,
+    /^\/bookings\/([^/]+)\/(finances|charges|bill|start-otp|verify-otp|otp-exception|retry|cash|refund|attachment)$/,
   );
   if (booking) {
     const id = booking[1],
@@ -168,6 +168,17 @@ export async function operationsAPI(
       });
     if (action === "retry" && method === "POST") {
       await checked(client.rpc("retry_booking", { p_booking: id }));
+      return json({ ok: true });
+    }
+    if (action === "refund" && method === "POST") {
+      await checked(
+        client.rpc("admin_verify_refund", {
+          p_booking: id,
+          p_amount: body.amount_paise,
+          p_reference: text(body.reference),
+          p_reason: text(body.reason),
+        }),
+      );
       return json({ ok: true });
     }
     if (action === "cash" && method === "POST") {
@@ -422,6 +433,12 @@ export async function operationsAPI(
       await checked(client.rpc("safe_booking", { p_booking: bookingId }));
     else if (!["commission", "logo"].includes(kind))
       throw new ApiError("Choose a booking for this image.");
+    await checked(
+      client.rpc("authorize_upload", {
+        p_kind: kind,
+        p_booking: bookingId || null,
+      }),
+    );
     let bytes: Buffer;
     try {
       bytes = await sharp(Buffer.from(await file.arrayBuffer()), {

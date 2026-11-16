@@ -1,6 +1,7 @@
 "use client";
 import React, { useEffect, useState } from "react";
 import { Field, Form, upload, PrivateImage, title } from "./shared";
+import { useVoiceState } from "../voice/provider";
 import { toPaise, inr } from "../../lib/operations/money.mjs";
 export function BookingOperations({
   booking: b,
@@ -10,6 +11,12 @@ export function BookingOperations({
   notify,
   refresh,
 }) {
+  const policy = useVoiceState()?.policy;
+  const [billDraft, setBillDraft] = useState({
+    labour: "",
+    materials: "0",
+    discount: "0",
+  });
   const [data, setData] = useState(null),
     [error, setError] = useState(""),
     [otp, setOTP] = useState(null),
@@ -43,6 +50,31 @@ export function BookingOperations({
     reload();
   };
   const bill = data?.bills.find((x) => x.status !== "void");
+  const previewAmount = (value) => {
+    try {
+      return toPaise(value);
+    } catch {
+      return 0;
+    }
+  };
+  const extraPreview =
+    (data?.charges || [])
+      .filter((c) => c.status === "approved")
+      .reduce((sum, c) => sum + Number(c.amount_paise), 0) +
+    Number(b.quotes?.find((q) => q.status === "approved")?.additional || 0) *
+      100;
+  const subPreview =
+    previewAmount(billDraft.labour) +
+    previewAmount(billDraft.materials) +
+    extraPreview -
+    previewAmount(billDraft.discount);
+  const totalPreview =
+    subPreview +
+    Math.round(
+      (Math.max(0, subPreview) *
+        Number(policy?.tax_enabled ? policy.tax_percent : 0)) /
+        100,
+    );
   return (
     <section className="booking-operations">
       <h3>Work verification & final bill</h3>
@@ -255,6 +287,10 @@ export function BookingOperations({
                       <input
                         type="number"
                         name="labour"
+                        value={billDraft.labour}
+                        onChange={(e) =>
+                          setBillDraft({ ...billDraft, labour: e.target.value })
+                        }
                         min="0"
                         step="0.01"
                         required
@@ -264,9 +300,15 @@ export function BookingOperations({
                       <input
                         type="number"
                         name="materials"
+                        value={billDraft.materials}
+                        onChange={(e) =>
+                          setBillDraft({
+                            ...billDraft,
+                            materials: e.target.value,
+                          })
+                        }
                         min="0"
                         step="0.01"
-                        defaultValue="0"
                         required
                       />
                     </Field>
@@ -274,9 +316,15 @@ export function BookingOperations({
                       <input
                         type="number"
                         name="discount"
+                        value={billDraft.discount}
+                        onChange={(e) =>
+                          setBillDraft({
+                            ...billDraft,
+                            discount: e.target.value,
+                          })
+                        }
                         min="0"
                         step="0.01"
-                        defaultValue="0"
                         required
                       />
                     </Field>
@@ -366,6 +414,43 @@ export function BookingOperations({
                   <summary>
                     Administrator bill resolution / verified cash payment
                   </summary>
+                  {["successful", "partially_refunded"].includes(
+                    b.payment_status,
+                  ) && (
+                    <Form
+                      label="Record verified refund"
+                      onSubmit={async (d) => {
+                        await run("/bookings/" + b.id + "/refund", {
+                          amount_paise: toPaise(d.amount),
+                          reference: d.reference,
+                          reason: d.reason,
+                        });
+                        notify(
+                          "Verified refund recorded; commission is held for review.",
+                        );
+                      }}
+                    >
+                      <p>
+                        Record only an actual, reconciled bank/cash refund. This
+                        does not initiate a transfer.
+                      </p>
+                      <Field label="Verified refund amount (INR)">
+                        <input
+                          name="amount"
+                          type="number"
+                          step="0.01"
+                          min="0.01"
+                          required
+                        />
+                      </Field>
+                      <Field label="Refund transaction reference">
+                        <input name="reference" required minLength={5} />
+                      </Field>
+                      <Field label="Refund verification reason">
+                        <textarea name="reason" required minLength={10} />
+                      </Field>
+                    </Form>
+                  )}
                   <Form
                     label="Record bill resolution"
                     onSubmit={async (d) => {

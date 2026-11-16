@@ -36,8 +36,8 @@ begin
 end $$;
 create or replace function private.voice_dto(p_call uuid) returns jsonb language sql stable security definer set search_path='' as $$
  select jsonb_build_object('id',c.id,'booking_id',c.booking_id,'booking_reference',upper(left(c.booking_id::text,8)),'caller_id',c.caller_id,'callee_id',c.callee_id,
- 'caller_name',case when c.caller_id=b.customer_id then 'Customer · '||upper(left(b.id::text,8)) else private.safe_text(coalesce(nullif(p.business_name,''),'Service provider')) end,
- 'callee_name',case when c.callee_id=b.customer_id then 'Customer · '||upper(left(b.id::text,8)) else private.safe_text(coalesce(nullif(p.business_name,''),'Service provider')) end,
+ 'caller_name',case when c.caller_id=b.customer_id then coalesce(nullif(private.safe_text((select name from public.users where id=b.customer_id)),''),'Customer · '||upper(left(b.id::text,8))) else private.safe_text(coalesce(nullif(p.business_name,''),'Service provider')) end,
+ 'callee_name',case when c.callee_id=b.customer_id then coalesce(nullif(private.safe_text((select name from public.users where id=b.customer_id)),''),'Customer · '||upper(left(b.id::text,8))) else private.safe_text(coalesce(nullif(p.business_name,''),'Service provider')) end,
  'status',c.status,'created_at',c.created_at,'accepted_at',c.accepted_at,'connected_at',c.connected_at,'ended_at',c.ended_at,'ended_reason',c.ended_reason,
  'duration_seconds',case when c.connected_at is not null then greatest(0,floor(extract(epoch from(coalesce(c.ended_at,now())-c.connected_at)))) else 0 end)
  from public.voice_calls c join public.bookings b on b.id=c.booking_id left join public.provider_profiles p on p.user_id=b.provider_id where c.id=p_call

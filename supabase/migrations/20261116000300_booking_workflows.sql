@@ -61,7 +61,7 @@ do $$ begin
  end if;
 end $$;
 create or replace function public.booking_action(p_booking uuid,p_action text,p_data jsonb default '{}') returns jsonb language plpgsql security definer set search_path='' as $$
-declare b public.bookings;
+declare b public.bookings;result jsonb;candidate uuid;
 begin
  if p_action='accept' then return public.accept_booking(p_booking);end if;
  if not public.account_active() then raise exception 'Sign in.' using errcode='42501';end if;
@@ -75,7 +75,19 @@ begin
   if b.provider_id is not null or not exists(select 1 from public.booking_provider_offers where booking_id=b.id and provider_id=auth.uid() and status='pending') then raise exception 'This request is no longer available.';end if;
   update public.booking_provider_offers set status='rejected',responded_at=now() where booking_id=b.id and provider_id=auth.uid();return jsonb_build_object('ok',true);
  end if;
- return private.legacy_booking_action(p_booking,p_action,p_data);
+ result:=private.legacy_booking_action(p_booking,p_action,p_data);
+ if p_action='quote-response' and not (p_data->>'accept')::boolean then
+  delete from public.booking_assignments where booking_id=b.id;
+  insert into public.booking_assignment_history(booking_id,provider_id,actor_id,event) values(b.id,b.provider_id,auth.uid(),'quote_declined');
+  update public.bookings set accepted_at=null,request_expired=false,request_expires_at=case when (private.ops()->>'request_timeout_minutes')::int>0 then now()+make_interval(mins=>(private.ops()->>'request_timeout_minutes')::int) else null end where id=b.id;
+  update public.booking_provider_offers set status='rejected',responded_at=now() where booking_id=b.id and provider_id=b.provider_id;
+  for candidate in select user_id from public.provider_profiles where user_id<>b.customer_id and user_id<>b.provider_id and public.provider_eligible(user_id,b.service_id,b.location) loop
+   insert into public.booking_provider_offers(booking_id,provider_id) values(b.id,candidate) on conflict(booking_id,provider_id) do update set status='pending',offered_at=now(),responded_at=null;
+   perform private.notify(candidate,'A Local Mate request is available again',b.id);
+  end loop;
+  insert into public.booking_events(booking_id,kind) values(b.id,'request_reopened');
+ end if;
+ return result;
 end $$;
 create or replace function private.work_verification_guard() returns trigger language plpgsql security definer set search_path='' as $$
 begin
@@ -92,7 +104,7 @@ begin
  if not public.can_view_booking(p_booking) then raise exception 'Booking not found or unavailable to your account.' using errcode='42501';end if;
  select * into b from public.bookings where id=p_booking;
  full_access:=public.is_admin() or b.customer_id=auth.uid() or(b.provider_id=auth.uid() and b.accepted_at is not null);
- result:=jsonb_build_object('id',b.id,'booking_reference',upper(left(b.id::text,8)),'service_id',b.service_id,'service_name',(select name from public.services where id=b.service_id),'service_type',(select type from public.services where id=b.service_id),'service_category',(select category from public.services where id=b.service_id),'provider_id',b.provider_id,'status',b.status,'request_expired',b.request_expired,'request_expires_at',b.request_expires_at,'scheduled_at',b.scheduled_at,'accepted_at',b.accepted_at,'location',b.location,'description',private.safe_text(b.description),'requires_quote',b.requires_quote,'estimated_price',b.estimated_price,'payment_status',b.payment_status,'payment_method',b.payment_method,'created_at',b.created_at,
+ result:=jsonb_build_object('id',b.id,'booking_reference',upper(left(b.id::text,8)),'service_id',b.service_id,'service_name',(select name from public.services where id=b.service_id),'service_type',(select type from public.services where id=b.service_id),'service_category',(select category from public.services where id=b.service_id),'provider_id',b.provider_id,'status',b.status,'request_expired',(b.request_expired or(private.ops()->>'request_expiry_mode'='expire' and b.request_expires_at<now())),'request_expires_at',b.request_expires_at,'scheduled_at',b.scheduled_at,'accepted_at',b.accepted_at,'location',b.location,'description',private.safe_text(b.description),'requires_quote',b.requires_quote,'estimated_price',b.estimated_price,'payment_status',b.payment_status,'payment_method',b.payment_method,'created_at',b.created_at,
  'provider_name',(select private.safe_text(coalesce(nullif(p.business_name,''),u.name)) from public.provider_profiles p join public.users u on u.id=p.user_id where p.user_id=b.provider_id),'provider_logo_id',(select logo_id from public.provider_profiles where user_id=b.provider_id),'customer_name','Customer · '||upper(left(b.id::text,8)));
  if full_access then result:=result||jsonb_build_object('customer_id',b.customer_id,'address',private.safe_text(b.address),'latitude',b.latitude,'longitude',b.longitude,'destination_latitude',b.destination_latitude,'destination_longitude',b.destination_longitude,'details',private.safe_json(b.details));else result:=result||jsonb_build_object('address','Exact address available after acceptance','details','{}'::jsonb);end if;
  return result;

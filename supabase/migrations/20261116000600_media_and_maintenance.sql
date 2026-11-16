@@ -36,6 +36,7 @@ begin
  if a.id is null then raise exception 'Image not found.';end if;
  update public.media_assets set review_status=case when p_approve then 'approved' else 'rejected' end,review_note=p_note where id=a.id;
  if p_approve and a.kind='logo' then update public.provider_profiles set logo_id=a.id where user_id=a.owner_id;end if;
+ if a.booking_id is not null then insert into public.booking_events(booking_id,kind) values(a.booking_id,'media_reviewed');end if;
  perform private.audit('Image privacy review',a.id::text);perform private.notify(a.owner_id,'Image privacy review: '||case when p_approve then 'approved' else 'rejected' end,a.booking_id);
 end $$;
 create or replace function public.send_attachment(p_booking uuid,p_asset uuid,p_body text default 'Image attachment') returns bigint language plpgsql security definer set search_path='' as $$
