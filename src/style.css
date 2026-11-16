@@ -14,3 +14,19 @@ body{overflow-x:hidden}
 /* Operational workflows and real in-app voice communication. */
 .voice-panel{position:fixed;right:20px;bottom:20px;width:min(390px,calc(100vw - 32px));max-height:85vh;overflow:auto;padding:22px;background:#fff;border:1px solid #b9def4;border-radius:20px;box-shadow:0 12px 70px #12374e44;z-index:5000;text-align:left}.voice-panel .panel-heading{gap:12px}.voice-panel .panel-heading strong{display:flex;gap:8px;align-items:center}.voice-panel h3{margin:18px 0 8px}.voice-panel .actions{gap:10px;flex-wrap:wrap;margin:16px 0}.voice-panel .button{padding:11px 14px;font-size:12px}.voice-panel>small{display:block;line-height:1.7;color:#5f7c92}.call-duration{display:block;font-size:26px;font-variant-numeric:tabular-nums;margin:12px 0}.booking-operations{padding:20px;margin-top:24px;border:1px solid #dbe8f3;border-radius:16px;text-align:left;background:#fbfdff}.booking-operations h3{margin:20px 0 12px}.booking-operations .field{margin-top:14px}.booking-operations details,.commission-statement details{padding:14px 0}.booking-operations summary,.commission-statement summary{cursor:pointer;color:#078bcd}.otp-card,.bill-card,.final-bill,.charge-row{padding:18px;border:1px solid #dce9f3;border-radius:14px;margin:18px 0;background:#fff}.otp-code{display:block;letter-spacing:7px;font-size:28px;padding:18px 0;color:#103e62}.media-grid{display:flex;flex-wrap:wrap;gap:16px}.private-image{width:160px;height:130px;object-fit:contain;border:1px solid #e2ecf2;border-radius:12px;background:#fff}.media-review,.commission-payment,.commission-statement{border-bottom:1px solid #dfeaf2;padding:22px 0;overflow-wrap:anywhere}.media-review>.private-image,.commission-payment .private-image{margin:15px 0}.commission-payment>small,.media-review>small{display:block;line-height:1.7}.payment-instructions{white-space:pre-wrap;overflow-wrap:anywhere;padding:16px;background:#edf8ff;border-radius:12px;font:inherit;font-size:13px}.audit-record{padding:12px 0;border-bottom:1px solid #e5edf3}.audit-record strong,.audit-record small{display:block}.audit-record pre{white-space:pre-wrap;font-size:11px;overflow-wrap:anywhere}.portal-tabs{display:flex;gap:8px}.portal-tabs button{white-space:nowrap}.operations-admin fieldset{margin:24px 0}.booking-operations .actions{flex-wrap:wrap}.commission-statement .offer-row{flex-wrap:wrap}
 @media(max-width:600px){.voice-panel{right:16px;bottom:16px;padding:18px}.booking-operations{padding:14px}.otp-card,.bill-card,.final-bill,.charge-row{padding:14px}.booking-operations .button{width:100%;justify-content:center}.commission-statement .table-row{flex-wrap:wrap}.portal-layout aside button{white-space:normal}.media-grid .private-image{width:120px;height:100px}}
+.otp-portal-message {
+  display: grid;
+  place-items: center;
+  min-height: 104px;
+  margin-bottom: 18px;
+  border: 2px solid #159ee8;
+  border-radius: 18px;
+  background: #eaf7ff;
+  color: #06254b;
+  font-size: clamp(2.8rem, 8vw, 5rem);
+  font-weight: 800;
+  letter-spacing: 0.22em;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  box-shadow: 0 14px 36px rgba(21, 158, 232, 0.18);
+}
