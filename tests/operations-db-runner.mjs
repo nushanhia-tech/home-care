@@ -67,13 +67,18 @@ try{
  // Exercise the destructive reset only inside a rolled-back local test transaction.
  const resetClient=await pool.connect();
  try {
-  await resetClient.query('BEGIN');await resetClient.query('SET LOCAL ROLE service_role');
+  await resetClient.query('BEGIN');
+  await resetClient.query("create or replace function private.legacy_reset_marketplace(p_actor uuid,p_confirmation text) returns void language plpgsql as $fn$ begin raise exception 'legacy cardinality failure' using errcode='21000';end $fn$");
+  await resetClient.query('SET LOCAL ROLE service_role');
   await resetClient.query("select set_config('request.jwt.claim.role','service_role',true)");
+  await resetClient.query("select public.service_reset_marketplace($1,'DELETE ALL DATA')",[ids.admin]);
   await resetClient.query("select public.service_reset_marketplace($1,'DELETE ALL DATA')",[ids.admin]);
   await resetClient.query('RESET ROLE');
   assert.equal((await resetClient.query('select count(*)::int n from public.bookings')).rows[0].n,0);
   assert.equal((await resetClient.query('select is_active from public.users where id=$1',[ids.admin])).rows[0].is_active,true);
-  check.push('full financial-data reset preserves administrator and runs transactionally');
+  assert.equal((await resetClient.query('select count(*)::int n from public.website_configuration where id and maintenance_mode and not registration_enabled')).rows[0].n,1);
+  assert.equal((await resetClient.query('select count(*)::int n from public.operations_configuration where id')).rows[0].n,1);
+  check.push('atomic reset bypasses legacy 21000 failures, is repeatable, and preserves administrator login');
  }finally{await resetClient.query('ROLLBACK');resetClient.release()}
  // Prepare an accepted live booking for the actual HTTP/WebRTC browser test.
  const live=await scalar(pool,'customer','create_booking',[booking()]);await scalar(pool,'p1','accept_booking',[live]);
