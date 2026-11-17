@@ -71,8 +71,8 @@ try{
   await resetClient.query("create or replace function private.legacy_reset_marketplace(p_actor uuid,p_confirmation text) returns void language plpgsql as $fn$ begin raise exception 'legacy cardinality failure' using errcode='21000';end $fn$");
   await resetClient.query('SET LOCAL ROLE service_role');
   await resetClient.query("select set_config('request.jwt.claim.role','service_role',true)");
-  await resetClient.query("select public.service_reset_marketplace($1,'DELETE ALL DATA')",[ids.admin]);
-  await resetClient.query("select public.service_reset_marketplace($1,'DELETE ALL DATA')",[ids.admin]);
+  await resetClient.query("select public.service_reset_marketplace_v2($1,'DELETE ALL DATA')",[ids.admin]);
+  await resetClient.query("select public.service_reset_marketplace_v2($1,'DELETE ALL DATA')",[ids.admin]);
   await resetClient.query('RESET ROLE');
   assert.equal((await resetClient.query('select count(*)::int n from public.bookings')).rows[0].n,0);
   assert.equal((await resetClient.query('select is_active from public.users where id=$1',[ids.admin])).rows[0].is_active,true);

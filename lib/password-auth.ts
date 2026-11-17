@@ -6,6 +6,7 @@ import {ApiError} from './errors';
 import {accountConfigurationIssue} from './account-config.mjs';
 import {normalizeUsername,validUsername,validPassword,reservedUsernames} from './username.mjs';
 async function rpc(client:SupabaseClient,name:string,args:Record<string,unknown>={}){const {data,error,status}=await client.rpc(name,args);if(error){if(error.code==='P0001'||error.code==='23505'||error.code?.startsWith('22'))throw error;const issue=accountConfigurationIssue(error,status);console.error('Account operation failed',{operation:name,code:error.code||'UPSTREAM_ERROR',status});throw new ApiError(issue.message,503,{code:issue.code,operation:name,providerCode:error.code||null});}return data;}
+function providerCode(error:unknown){return error instanceof ApiError?error.details.providerCode:null;}
 export async function authAdmin(){if(!administrationConfigured())throw new ApiError('Username sign-in needs server setup. Add SUPABASE_SERVICE_ROLE_KEY in Vercel and redeploy.',503);return await createServiceAdmin();}
 async function attempt(req:NextRequest,kind:string){
  const client=await authAdmin();const ip=req.headers.get('x-vercel-forwarded-for')||req.headers.get('x-forwarded-for')?.split(',')[0]||req.headers.get('x-real-ip')||'local';
@@ -46,7 +47,13 @@ export async function passwordPublicRoute(req:NextRequest,path:string,body:any,s
 }
 export async function verifyCurrentPassword(req:NextRequest,email:string,password:unknown){
  if(typeof password!=='string'||!password)throw new ApiError('Enter your current password.');
- await attempt(req,'reauthenticate');
+ try{await attempt(req,'reauthenticate');}catch(error){
+  // Older partially upgraded projects can have duplicate bootstrap records.
+  // Supabase Auth still rate-limits and verifies the password, so this legacy
+  // cardinality failure must not permanently lock the administrator out.
+  if(providerCode(error)!=='21000')throw error;
+  console.warn('Legacy reauthentication limiter conflict bypassed',{code:'21000'});
+ }
  const client=plainClient(process.env.NEXT_PUBLIC_SUPABASE_URL!,process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!,{auth:{persistSession:false,autoRefreshToken:false}});
  const {error}=await client.auth.signInWithPassword({email,password});
  if(error)throw new ApiError('Current password is incorrect.',403);
@@ -79,10 +86,12 @@ export async function deleteAllData(req:NextRequest,user:any,supabase:SupabaseCl
  await verifyCurrentPassword(req,user.email,body.current_password);
  const admin=await authAdmin();const targets:string[]=[];
  for(let page=1;;page++){const {data,error}=await admin.auth.admin.listUsers({page,perPage:1000});if(error)throw new ApiError('User accounts could not be listed. Nothing has been deleted.',503);targets.push(...data.users.filter(u=>u.id!==user.id).map(u=>u.id));if(data.users.length<1000)break;}
- await rpc(admin,'service_reset_marketplace',{p_actor:user.id,p_confirmation:body.confirmation});
+ await rpc(admin,'service_reset_marketplace_v2',{p_actor:user.id,p_confirmation:body.confirmation});
  targets.length=0;
  for(let page=1;;page++){const {data,error}=await admin.auth.admin.listUsers({page,perPage:1000});if(error)throw new ApiError('Marketplace records were removed and the website is paused. Retry account cleanup.',503);targets.push(...data.users.filter(u=>u.id!==user.id).map(u=>u.id));if(data.users.length<1000)break;}
  const failed:string[]=[];for(const id of targets){const {error}=await admin.auth.admin.deleteUser(id);if(error)failed.push(id);}
- await rpc(admin,'service_reset_progress',{p_actor:user.id,p_note:JSON.stringify({deleted:targets.length-failed.length,failed:failed.length})});
- return {ok:failed.length===0,deleted_accounts:targets.length-failed.length,remaining_accounts:failed.length,message:failed.length?'Marketplace records were removed. Some accounts remain; retry cleanup.':'All marketplace records and other accounts were removed. The website is paused and your administrator login is preserved.'};
+ let audit_logged=true;
+ try{await rpc(admin,'service_reset_progress_v2',{p_actor:user.id,p_note:JSON.stringify({deleted:targets.length-failed.length,failed:failed.length})});}
+ catch(error){audit_logged=false;console.error('Account cleanup audit failed after successful reset',{code:providerCode(error)||'UPSTREAM_ERROR'});}
+ return {ok:failed.length===0,deleted_accounts:targets.length-failed.length,remaining_accounts:failed.length,audit_logged,message:failed.length?'Marketplace records were removed. Some accounts remain; retry cleanup.':'All marketplace records and other accounts were removed. The website is paused and your administrator login is preserved.'};
 }
